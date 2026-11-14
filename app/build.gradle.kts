@@ -4,13 +4,12 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// La llave de firma NO está en el repositorio (es público). En GitHub Actions llega desde los secretos
-// FIRMA_JKS_BASE64 y FIRMA_CLAVE (ver README). Todas las versiones deben firmarse con la MISMA llave:
-// así cada APK nuevo se instala encima del anterior y conserva los datos.
-// Sin la llave (compilación local) se usa la de depuración: sirve para probar, no para distribuir.
-val firmaArchivo: String? = System.getenv("FIRMA_ARCHIVO")
-val firmaClave: String? = System.getenv("FIRMA_CLAVE")
-val conFirma = !firmaArchivo.isNullOrBlank() && !firmaClave.isNullOrBlank() && file(firmaArchivo!!).exists()
+// Llave fija del proyecto: TODAS las versiones se firman con ella, así cada APK nuevo se instala
+// encima del anterior y conserva los datos. NO cambiar ni borrar app/firma/geomembrana.jks.
+// (Por decisión del dueño del proyecto la llave está en el repositorio. Si se definen los secretos
+// FIRMA_JKS_BASE64 / FIRMA_CLAVE en GitHub, se usan esos en su lugar.)
+val firmaArchivo: String = System.getenv("FIRMA_ARCHIVO")?.ifBlank { null } ?: "firma/geomembrana.jks"
+val firmaClave: String = System.getenv("FIRMA_CLAVE")?.ifBlank { null } ?: "xxvgn5Ppv920gOmVKUFH"
 
 android {
     namespace = "co.obra.geomembrana"
@@ -27,20 +26,18 @@ android {
     }
 
     signingConfigs {
-        if (conFirma) {
-            create("obra") {
-                storeFile = file(firmaArchivo!!)
-                storePassword = firmaClave
-                keyAlias = System.getenv("FIRMA_ALIAS")?.ifBlank { null } ?: "geomembrana"
-                keyPassword = firmaClave
-            }
+        create("obra") {
+            storeFile = file(firmaArchivo)
+            storePassword = firmaClave
+            keyAlias = System.getenv("FIRMA_ALIAS")?.ifBlank { null } ?: "geomembrana"
+            keyPassword = firmaClave
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = if (conFirma) signingConfigs.getByName("obra") else signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("obra")
         }
     }
     compileOptions {

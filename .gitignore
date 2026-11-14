@@ -4,6 +4,7 @@ local.properties
 .idea/
 *.iml
 .DS_Store
-# Nunca subir la llave de firma al repositorio (es público)
+# Llaves de firma: solo se versiona la del proyecto (app/firma/geomembrana.jks)
 *.jks
 *.keystore
+!app/firma/geomembrana.jks

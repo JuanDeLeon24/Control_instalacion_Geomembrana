@@ -30,18 +30,13 @@ oficiales del registro, aunque difieran unas centésimas de longitud × perímet
 ### Actualizaciones sin perder datos
 Cada APK nuevo se instala **encima** del anterior y conserva registros, fotos y configuración, porque:
 
-1. **Todas las versiones se firman con la misma llave del proyecto.** La llave no está en el repositorio (es público):
-   se guarda en dos secretos de GitHub, *Settings → Secrets and variables → Actions → New repository secret*:
-
-   | Secreto | Contenido |
-   |---|---|
-   | `FIRMA_JKS_BASE64` | La llave (.jks) en base64 |
-   | `FIRMA_CLAVE` | La contraseña de la llave |
-
-   Si faltan, la compilación **se detiene con un error** en vez de producir un APK que obligaría a desinstalar. Después
-   de compilar, el flujo verifica que el APK quedó firmado con la llave del proyecto (huella SHA-256
+1. **Todas las versiones se firman con la misma llave del proyecto**: `app/firma/geomembrana.jks` (por decisión del dueño
+   del proyecto está en el repositorio, para que la compilación sea automática). **No la borres ni la cambies**: con otra
+   llave el APK nuevo no se instalaría encima. El flujo verifica que cada APK quede firmado con ella (huella SHA-256
    `26:BB:97:78:73:4B:C6:8D:AC:3D:2D:0F:35:98:E1:E4:D8:E8:A7:21:E2:C6:89:B4:CA:5C:7C:A7:E2:5F:B5:61`).
-   Guarda una copia de la llave y su contraseña fuera de GitHub: sin ellas no se pueden publicar actualizaciones.
+   Como el repositorio es público, cualquiera podría firmar un APK con esa llave: instala solo APK descargados de la
+   pestaña Actions de este repositorio. Para más seguridad, pasa el repositorio a privado o mueve la llave a los
+   secretos `FIRMA_JKS_BASE64` / `FIRMA_CLAVE` (si existen, se usan en lugar del archivo).
 2. **El número de versión sube en cada compilación** (`versionCode` = número de ejecución + 10; el APK se llama
    `ControlGeomembrana-v1.1.N.apk`).
 3. **La base de datos se migra sin borrar nada**: los cambios de versión solo agregan tablas o columnas.
