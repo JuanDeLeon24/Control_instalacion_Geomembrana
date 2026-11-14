@@ -74,7 +74,8 @@ data class Registro(
     val longitudManual: Double?,    // null = |absFin - absIni|
     val perimetro: Double?,         // desarrollo transversal instalado (m)
     val areaManual: Double?,        // cantidad oficial en m² si difiere de longitud × perímetro (redondeos)
-    val rollos: List<String>,
+    val rollos: List<String>,       // códigos de rollos (opcional, versión anterior)
+    val numRollos: Int?,            // cantidad de rollos usados (unidades)
     val tempCuna: Double?,          // °C
     val velSoldadura: Double?,      // m/min
     val prueba: Prueba,
@@ -108,7 +109,7 @@ data class Proyecto(
     val absIni: Double = 6176.57,
     val absFin: Double = 7173.00,
     val secciones: List<Seccion> = SECCIONES,
-    val turnosPorDia: Int = 1,           // 1 = solo turno día, 2 = día y noche
+    val turnosPorDia: Int = 2,           // 1 = solo turno día, 2 = día y noche
     val horaInicioDia: String = "06:00",
     val horaInicioNoche: String = "18:00",
     val turnosParaEta: Int = 6,          // últimos turnos que se promedian para la proyección

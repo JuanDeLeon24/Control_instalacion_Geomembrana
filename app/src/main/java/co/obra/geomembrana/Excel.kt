@@ -94,7 +94,7 @@ object Excel {
         reg.congelar = 1
         reg.fila(listOf("Fecha", "Turno", "Sección", "Responsable", "Cuadrilla", "PK inicial", "PK final", "Abs. inicial (m)",
             "Abs. final (m)", "Longitud (m)", "Perímetro (m)", "Cantidad (m²)", "Hora inicio", "Hora fin", "Horas", "m/h", "m²/h",
-            "Rollos", "Notas").map { c(it, ENC) }, 32.0)
+            "Rollos (und)", "Notas").map { c(it, ENC) }, 32.0)
         regs.forEach { r ->
             val f = reg.siguiente
             val h = r.minutos?.takeIf { it > 0 }?.let { it / 60.0 }
@@ -109,29 +109,30 @@ object Excel {
                 },
                 hora(r.horaIni), hora(r.horaFin), d(h),
                 d(h?.let { r.longitud / it }), d(if (h != null && area != null) area / h else null),
-                c(r.rollos.joinToString(", "), TEXTO), c(r.notas, TEXTO)))
+                c(r.numRollos?.toDouble(), NUM), c(r.notas, TEXTO)))
         }
         val ult = reg.filas.size
         if (regs.isNotEmpty()) {
             reg.fila(List(9) { c(if (it == 0) "TOTAL" else null, TOT_ETIQ) } +
                 listOf(c(Formula("SUM(J2:J$ult)", rend.longitud), TOT_NUM), c(null, TOT_NUM),
                     c(Formula("SUM(L2:L$ult)", rend.area), TOT_NUM), c(null, TOT_NUM), c(null, TOT_NUM),
-                    c(Formula("SUM(O2:O$ult)", rend.minutos / 60.0), TOT_NUM)))
+                    c(Formula("SUM(O2:O$ult)", rend.minutos / 60.0), TOT_NUM), c(null, TOT_NUM), c(null, TOT_NUM),
+                    c(Formula("SUM(R2:R$ult)", rend.rollos.toDouble()), TOT_NUM)))
             reg.combinadas += "A${reg.filas.size}:I${reg.filas.size}"
         }
         reg.filtro = "A1:S${maxOf(2, ult)}"
 
         // ---------- Por fecha, separado por grupo ----------
         val nombres = grupos.map { it.nombre }
-        val pf = Hoja("Por fecha", listOf(12.0) + nombres.flatMap { listOf(12.0, 13.0) } + listOf(13.0, 8.0))
+        val pf = Hoja("Por fecha", listOf(12.0) + nombres.flatMap { listOf(12.0, 13.0) } + listOf(13.0, 11.0, 8.0))
         pf.congelar = 1
         pf.fila(listOf(c("Fecha", ENC)) + nombres.flatMap { listOf(c("$it (m)", ENC), c("$it (m²)", ENC)) } +
-            listOf(c("Total (m²)", ENC), c("Fotos", ENC)), 32.0)
+            listOf(c("Total (m²)", ENC), c("Rollos (und)", ENC), c("Fotos", ENC)), 32.0)
         Calc.porFecha(regs).forEach { x ->
             val m = Calc.metricas(x.registros, p).associateBy { it.nombre }
             pf.fila(listOf(c(T.serialExcel(x.fecha), FECHA)) +
                 nombres.flatMap { n -> listOf(d(m[n]?.total?.longitud), d(m[n]?.total?.area)) } +
-                listOf(d(x.rend.area, DEC2), c("${porDia[x.fecha]?.size ?: 0}/4", CENTRO)))
+                listOf(d(x.rend.area, DEC2), c(x.rend.rollos.toDouble(), NUM), c("${porDia[x.fecha]?.size ?: 0}/4", CENTRO)))
         }
 
         // ---------- Curva S (secciones en curso) ----------
@@ -163,20 +164,6 @@ object Excel {
                 d(x.area), d(x.minutos / 60.0), d(x.mPorHora), d(x.m2PorHora)))
         }
         hojas += cu
-        val rollos = Calc.porRollo(regs)
-        if (rollos.isNotEmpty()) {
-            val ro = Hoja("Rollos", listOf(16.0, 11.0, 15.0, 15.0, 12.0, 12.0))
-            ro.congelar = 1
-            ro.fila(listOf("Rollo", "Registros", "Longitud (m)*", "Área (m²)*", "Primer uso", "Último uso").map { c(it, ENC) }, 32.0)
-            rollos.forEach { x ->
-                ro.fila(listOf(c(x.codigo, TEXTO), c(x.registros.toDouble(), NUM), d(x.longitud), d(x.area),
-                    c(T.serialExcel(x.primera), FECHA), c(T.serialExcel(x.ultima), FECHA)))
-            }
-            ro.fila(emptyList())
-            ro.fila(listOf(c("* Cuando un registro usa varios rollos, su longitud y área se reparten por igual entre ellos.", SUB)))
-            hojas += ro
-        }
-
         return escribir(ctx, nombreArchivo("Geomembrana_${p.nombre}_${T.hoy()}"), hojas)
     }
 

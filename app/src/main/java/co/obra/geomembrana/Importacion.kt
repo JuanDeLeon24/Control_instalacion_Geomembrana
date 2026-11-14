@@ -8,7 +8,7 @@ import kotlin.math.abs
  * Lee un registro de avance en texto (CSV con ; o , o texto pegado de Excel con tabuladores).
  * Columnas reconocidas por su título (el orden no importa):
  *   Sección | Fecha | PK inicial | PK final | Longitud (m) | Cantidad (m²)   [obligatorias: Sección, Fecha, PK inicial, PK final]
- *   Turno | Responsable | Cuadrilla | Rollos | Notas                         [opcionales]
+ *   Jornada (o Turno) | Hora inicio | Hora fin | Rollos (und) | Responsable | Cuadrilla | Notas   [opcionales]
  * No depende de Android (se prueba en la JVM).
  */
 object Importacion {
@@ -72,6 +72,13 @@ object Importacion {
         return runCatching { (if (mesPrimero) LocalDate.of(y, a, b) else LocalDate.of(y, b, a)).toString() }.getOrNull()
     }
 
+    /** "7:30", "07:30", "07:30:00" -> "07:30"; vacío si no se entiende. */
+    fun hora(s: String): String {
+        val m = Regex("^(\\d{1,2})[:.](\\d{2})(?::\\d{2})?$").matchEntire(s.trim()) ?: return ""
+        val min = m.groupValues[1].toInt() * 60 + m.groupValues[2].toInt()
+        return if (m.groupValues[1].toInt() in 0..23 && m.groupValues[2].toInt() in 0..59) Horas.formato(min) else ""
+    }
+
     fun leer(texto: String, p: Proyecto): Resultado {
         val lineas = texto.replace("﻿", "").lines().filter { it.isNotBlank() }
         if (lineas.isEmpty()) return Resultado(emptyList(), emptyList(), listOf("El archivo está vacío."))
@@ -83,7 +90,9 @@ object Importacion {
         val cFin = columna(titulos, "pk final", "abscisa final", "abs. final", "abs final", "k final")
         val cLong = columna(titulos, "longitud")
         val cArea = columna(titulos, "cantidad", "area")
-        val cTurno = columna(titulos, "turno")
+        val cTurno = columna(titulos, "turno", "jornada")
+        val cHIni = columna(titulos, "hora inicio", "hora de inicio", "inicio")
+        val cHFin = columna(titulos, "hora fin", "hora de fin", "hora final", "fin")
         val cResp = columna(titulos, "responsable")
         val cCuad = columna(titulos, "cuadrilla")
         val cRollos = columna(titulos, "rollo")
@@ -126,14 +135,42 @@ object Importacion {
                 id = UUID.randomUUID().toString(), fecha = fe!!,
                 turno = if (Texto.clave(col(f, cTurno)).startsWith("noche")) Turnos.NOCHE else Turnos.DIA,
                 seccion = seccion.nombre, responsable = col(f, cResp), cuadrilla = col(f, cCuad),
-                absIni = ini, absFin = fin, horaIni = "", horaFin = "",
+                absIni = ini, absFin = fin, horaIni = hora(col(f, cHIni)), horaFin = hora(col(f, cHFin)),
                 longitudManual = longManual, perimetro = perim, areaManual = areaManual,
-                rollos = col(f, cRollos).split(',', '/').map { it.trim() }.filter { it.isNotEmpty() },
+                rollos = col(f, cRollos).takeIf { Fmt.leer(it) == null }?.split(',', '/')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
+                numRollos = Fmt.leer(col(f, cRollos))?.let { Math.round(it).toInt() },
                 tempCuna = null, velSoldadura = null, prueba = Prueba.NA, geotextil = Geotextil.OK,
                 notas = col(f, cNotas), creado = "importado-%05d".format(n)
             )
         }
         return Resultado(registros, nuevas.values.toList(), errores)
+    }
+
+    data class Fusion(val nuevos: List<Registro>, val actualizados: List<Registro>, val iguales: Int)
+
+    /**
+     * Combina lo importado con lo que ya hay en el teléfono. Un registro con la misma sección, fecha y abscisas es el
+     * mismo: se actualiza con los datos del archivo (jornada, horas, rollos, longitud y cantidad) conservando su
+     * identificador, responsable, cuadrilla y notas si el archivo no los trae. Los demás se agregan como nuevos.
+     */
+    fun fusionar(existentes: List<Registro>, importados: List<Registro>): Fusion {
+        val porClave = existentes.associateBy { clave(it) }
+        val nuevos = mutableListOf<Registro>(); val act = mutableListOf<Registro>(); var iguales = 0
+        importados.forEach { n ->
+            val e = porClave[clave(n)]
+            if (e == null) { nuevos += n; return@forEach }
+            val u = e.copy(
+                turno = n.turno,
+                horaIni = n.horaIni.ifBlank { e.horaIni }, horaFin = n.horaFin.ifBlank { e.horaFin },
+                numRollos = n.numRollos ?: e.numRollos,
+                rollos = n.rollos.ifEmpty { e.rollos },
+                longitudManual = n.longitudManual, areaManual = n.areaManual, perimetro = n.perimetro ?: e.perimetro,
+                responsable = n.responsable.ifBlank { e.responsable }, cuadrilla = n.cuadrilla.ifBlank { e.cuadrilla },
+                notas = n.notas.ifBlank { e.notas }
+            )
+            if (u == e) iguales++ else act += u
+        }
+        return Fusion(nuevos, act, iguales)
     }
 
     /** Clave para detectar un registro repetido: misma sección, fecha y abscisas. */

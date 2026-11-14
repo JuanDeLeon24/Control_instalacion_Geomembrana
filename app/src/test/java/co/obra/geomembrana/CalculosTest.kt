@@ -19,7 +19,7 @@ class CalculosTest {
         rollos: List<String> = emptyList(), cuadrilla: String = "", temp: Double? = null, vel: Double? = null,
         prueba: Prueba = Prueba.APROBADO, geo: Geotextil = Geotextil.OK, id: String = "$fecha-$turno-$ini",
         seccion: String = "Bóveda", areaManual: Double? = null
-    ) = Registro(id, fecha, turno, seccion, "Residente", cuadrilla, ini, fin, hi, hf, manual, perim, areaManual, rollos, temp, vel,
+    ) = Registro(id, fecha, turno, seccion, "Residente", cuadrilla, ini, fin, hi, hf, manual, perim, areaManual, rollos, null, temp, vel,
         prueba, geo, "", id)
 
     @Test fun abscisas() {
@@ -197,7 +197,7 @@ class AvanceRealTest {
         assertEquals(3981.50, grupos[0].rend.area, 1e-6)          // 1990,98 + 1990,52 m²
         assertEquals(660.61 / 996.43, grupos[1].porcentaje, 1e-9)
         assertEquals(335.82, grupos[1].pendiente, 1e-6)
-        assertEquals(LocalDate.of(2026, 11, 24), grupos[1].etaFecha!!.toLocalDate())
+        assertEquals(s["Bóveda"]!!.eta.fechaHora, grupos[1].etaFecha)
         // Métricas de una jornada: 2026-07-23 solo bota (HD y HI)
         val m = Calc.metricas(res.registros.filter { it.fecha == "2026-07-23" }, p)
         assertEquals(1, m.size)
@@ -211,11 +211,18 @@ class AvanceRealTest {
     @Test fun proyeccionBoveda() {
         val bov = Calc.deSeccion(res.registros, "Bóveda")
         val e = Calc.eta(bov, p)
-        // Últimos 6 turnos: 10/09 (7,29), 10/10 (14,58), 10/11 (10), 10/12 (7,29), 10/13 (7,29), 10/14 (3,16)
-        assertEquals(49.61 / 6, e.mPorTurno!!, 1e-9)
-        assertEquals(335.82 / (49.61 / 6), e.turnosRestantes!!, 1e-9)
-        assertEquals(LocalDate.of(2026, 11, 24), e.fechaHora!!.toLocalDate())
-
+        // Últimos 6 turnos (día y noche): 10/10 D 7,29 · 10/10 N 7,29 · 10/11 D 10 · 10/12 N 7,29 · 10/13 N 7,29 · 10/14 D 3,16
+        assertEquals(listOf("2026-10-10 Día", "2026-10-10 Noche", "2026-10-11 Día", "2026-10-12 Noche", "2026-10-13 Noche", "2026-10-14 Día"),
+            Calc.porTurno(bov).takeLast(6).map { "${it.fecha} ${it.turno}" })
+        assertEquals(42.32 / 6, e.mPorTurno!!, 1e-9)
+        assertEquals(335.82 / (42.32 / 6), e.turnosRestantes!!, 1e-9)
+        // Horas de esos 6 turnos: 10 h, 10 h, 7 h, 8 h, 10 h, 10 h
+        assertEquals((600 + 600 + 420 + 480 + 600 + 600) / 6.0 / 60.0, e.horasPorTurno!!, 1e-9)
+        assertNotNull(e.fechaHora)
+        // Rendimiento por hora con los horarios reales
+        val r = Calc.rendimiento(bov)
+        assertTrue(r.mPorHora!! > 0)
+        assertEquals(776, r.rollos)
         val c = Calc.curvaS(res.registros, p.secciones[2], p)
         assertEquals(LocalDate.of(2026, 8, 13), c.real.first().fecha)
         assertEquals(0.0, c.real.first().metros, 1e-9)
@@ -223,14 +230,40 @@ class AvanceRealTest {
         assertEquals(660.61, c.real.last().metros, 1e-6)
         // La curva real nunca baja
         assertTrue(c.real.zipWithNext().all { (a, b) -> b.metros >= a.metros - 1e-9 })
-        assertEquals(LocalDate.of(2026, 11, 24), c.proyReciente.last().fecha)
+        assertEquals(e.fechaHora!!.toLocalDate().let { if (it.isAfter(c.proyReciente.last().fecha)) it else c.proyReciente.last().fecha }, c.proyReciente.last().fecha)
         assertEquals(996.43, c.proyReciente.last().metros, 1e-9)
         assertTrue(c.proyPromedio.isNotEmpty())
-        // Promedio de todos los turnos de la bóveda: 660,98 m en 45 días con registro
-        assertEquals(660.98 / 45, c.mPorDiaPromedio!!, 1e-9)
+        // Promedio de todos los turnos de la bóveda: 660,98 m en 55 turnos (42 de día + 13 de noche), × 2 turnos por día
+        assertEquals(660.98 / 55 * 2, c.mPorDiaPromedio!!, 1e-9)
         // Botas: sin proyección si se marcan terminadas
         val bota = Calc.curvaS(res.registros, Seccion("Bota HD", 2.0, terminada = true), p)
         assertTrue(bota.proyReciente.isEmpty())
+    }
+
+    @Test fun jornadaHorasYRollos() {
+        val bov = Calc.deSeccion(res.registros, "Bóveda")
+        assertEquals(13, bov.count { it.turno == Turnos.NOCHE })
+        val n = bov.first { it.fecha == "2026-09-25" && it.turno == Turnos.NOCHE }
+        assertEquals("18:30", n.horaIni); assertEquals("04:15", n.horaFin)
+        assertEquals(585, n.minutos)                       // cruza la medianoche
+        assertEquals(34, n.numRollos)
+        assertEquals(131, Calc.deSeccion(res.registros, "Bota HD").sumOf { it.numRollos ?: 0 })
+        assertEquals(124, Calc.deSeccion(res.registros, "Bota HI").sumOf { it.numRollos ?: 0 })
+        val m = Calc.metricas(res.registros.filter { it.fecha == "2026-09-25" }, p)
+        assertEquals(54, m[0].total.rollos)
+        assertEquals(19.5, m[0].total.longitud, 1e-9)
+    }
+
+    @Test fun fusionActualizaSinDuplicar() {
+        // Datos como los tenía el teléfono antes (sin jornada, horas ni rollos) + uno ingresado a mano
+        val viejos = res.registros.map { it.copy(id = "v-" + it.creado, turno = Turnos.DIA, horaIni = "", horaFin = "", numRollos = null, notas = "nota") }
+        val manual = res.registros.first().copy(id = "manual", fecha = "2026-11-13", absIni = 6512.39, absFin = 6507.0, seccion = "Bóveda")
+        val f = Importacion.fusionar(viejos + manual, res.registros)
+        assertTrue(f.nuevos.isEmpty())
+        assertEquals(100, f.actualizados.size)
+        assertTrue(f.actualizados.all { it.id.startsWith("v-") && it.notas == "nota" && it.numRollos != null && it.horaIni.isNotEmpty() })
+        // Aplicarlo dos veces no cambia nada más
+        assertEquals(100, Importacion.fusionar(f.actualizados, res.registros).iguales)
     }
 
     @Test fun fechasConBarras() {

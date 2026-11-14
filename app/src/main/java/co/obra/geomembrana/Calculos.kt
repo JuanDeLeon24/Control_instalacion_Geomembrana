@@ -99,6 +99,7 @@ data class Rendimiento(
     val longitud: Double,            // m (suma de longitudes de los registros)
     val area: Double,                // m² (solo registros con perímetro)
     val minutos: Int,                // minutos trabajados (solo registros con horas)
+    val rollos: Int,                 // rollos usados (unidades)
     val mPorHora: Double?,
     val m2PorHora: Double?
 )
@@ -309,6 +310,7 @@ object Calc {
             longitud = registros.sumOf { it.longitud },
             area = registros.sumOf { it.area ?: 0.0 },
             minutos = min,
+            rollos = registros.sumOf { it.numRollos ?: 0 },
             mPorHora = if (horas > 0) conHoras.sumOf { it.longitud } / horas else null,
             m2PorHora = if (minArea > 0) conArea.sumOf { it.area ?: 0.0 } / (minArea / 60.0) else null
         )

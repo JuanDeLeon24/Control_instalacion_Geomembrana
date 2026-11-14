@@ -269,7 +269,7 @@ object Pdf {
     private val COLS = listOf(
         "Fecha" to 40f, "Sección" to 44f, "Abscisa\ninicial" to 54f, "Abscisa\nfinal" to 54f, "Longitud\n(m)" to 42f,
         "Perímetro\n(m)" to 42f, "Área\n(m²)" to 48f, "Horario" to 56f, "Horas" to 32f, "m/h" to 32f, "m²/h" to 38f,
-        "Rollos" to 120f
+        "Rollos\n(und)" to 40f, "Turno" to 40f
     )
 
     private fun tablaRegistros(h: Hojas, regs: List<Registro>, p: Proyecto) {
@@ -293,14 +293,13 @@ object Pdf {
                 Fmt.fijo(r.area) + if (r.areaManual != null) "°" else "",
                 if (r.horaIni.isNotBlank() || r.horaFin.isNotBlank()) "${r.horaIni}–${r.horaFin}" else "",
                 Fmt.num(hrs), Fmt.num(hrs?.let { r.longitud / it }), Fmt.num(if (hrs != null && r.area != null) r.area!! / hrs else null, 1),
-                r.rollos.joinToString(", ")
+                r.numRollos?.toString() ?: "", r.turno
             )
-            val hFila = maxOf(15f, alto(vals[11], f, ws[11]))
+            val hFila = 15f
             h.espacio(hFila)
             var x = M
             vals.forEachIndexed { i, v ->
-                celda(h.c, x, h.y, ws[i], hFila, v.ifBlank { if (i in 4..10) "–" else "" }, f,
-                    if (i == 11) NORMAL else CENTRO)
+                celda(h.c, x, h.y, ws[i], hFila, v.ifBlank { if (i in 4..11) "–" else "" }, f, CENTRO)
                 x += ws[i]
             }
             h.y += hFila
@@ -313,7 +312,7 @@ object Pdf {
         celda(h.c, M, h.y, wEt, 17f, "TOTAL  (${regs.size} ${if (regs.size == 1) "registro" else "registros"})", tot, fondo = CLARO)
         var x = M + wEt
         val totales = listOf(Fmt.fijo(rend.longitud), "", Fmt.fijo(rend.area), "", Fmt.num(rend.minutos / 60.0),
-            Fmt.num(rend.mPorHora), Fmt.num(rend.m2PorHora, 1))
+            Fmt.num(rend.mPorHora), Fmt.num(rend.m2PorHora, 1), if (rend.rollos > 0) rend.rollos.toString() else "")
         totales.forEachIndexed { i, t -> celda(h.c, x, h.y, ws[4 + i], 17f, t, tot, CENTRO, fondo = CLARO); x += ws[4 + i] }
         celda(h.c, x, h.y, ancho - (x - M), 17f, "", tot, fondo = CLARO)
         h.y += 17f
@@ -494,7 +493,7 @@ object Pdf {
                 h.y += 4f
                 val r = g.total
                 kpis(h, listOf(
-                    Triple(g.nombre, "${Fmt.fijo(r.longitud)} m", "${r.registros} registro(s)"),
+                    Triple(g.nombre, "${Fmt.fijo(r.longitud)} m", "${r.registros} registro(s)" + if (r.rollos > 0) " · ${r.rollos} rollos" else ""),
                     Triple("Área cubierta", "${Fmt.fijo(r.area)} m²", "longitud × perímetro"),
                     Triple("Horas trabajadas", if (r.minutos > 0) Fmt.duracion(r.minutos.toDouble()) else "–", ""),
                     Triple("Rendimiento", if (r.mPorHora != null) "${Fmt.num(r.mPorHora)} m/h" else "–",
@@ -523,22 +522,14 @@ object Pdf {
         if (dia == null) {
             titulo(h, "Avance por fecha")
             val nombres = grupos.map { it.nombre }
-            tablaSimple(h, listOf("Fecha") + nombres.flatMap { listOf("$it (m)", "$it (m²)") } + "Total (m²)",
-                listOf(1.4f) + nombres.flatMap { listOf(1f, 1.2f) } + 1.2f,
+            tablaSimple(h, listOf("Fecha") + nombres.flatMap { listOf("$it (m)", "$it (m²)") } + listOf("Total (m²)", "Rollos"),
+                listOf(1.4f) + nombres.flatMap { listOf(1f, 1.2f) } + listOf(1.2f, 0.8f),
                 Calc.porFecha(acumulado).map { x ->
                     val m = Calc.metricas(x.registros, p).associateBy { it.nombre }
                     listOf(T.fechaCorta(x.fecha)) + nombres.flatMap { n ->
                         listOf(m[n]?.let { Fmt.fijo(it.total.longitud) } ?: "", m[n]?.let { Fmt.fijo(it.total.area) } ?: "")
-                    } + Fmt.fijo(x.rend.area)
+                    } + listOf(Fmt.fijo(x.rend.area), x.rend.rollos.takeIf { it > 0 }?.toString() ?: "")
                 })
-            val rollos = Calc.porRollo(acumulado)
-            if (rollos.isNotEmpty()) {
-                titulo(h, "Desglose por rollo (longitud y área repartidas entre los rollos de cada registro)")
-                tablaSimple(h, listOf("Rollo", "Registros", "Longitud (m)", "Área (m²)", "Primer uso", "Último uso"),
-                    listOf(2f, 1f, 1.3f, 1.3f, 1.3f, 1.3f),
-                    rollos.map { listOf(it.codigo, it.registros.toString(), Fmt.fijo(it.longitud), Fmt.fijo(it.area),
-                        T.fechaCorta(it.primera), T.fechaCorta(it.ultima)) })
-            }
             val cuad = Calc.porCuadrilla(acumulado).filter { it.nombre != "Sin asignar" }
             if (cuad.isNotEmpty()) {
                 titulo(h, "Rendimiento por cuadrilla")

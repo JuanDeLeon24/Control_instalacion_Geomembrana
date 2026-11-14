@@ -125,29 +125,37 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
     var fotosDia by remember { mutableStateOf<String?>(null) }
     var resultadoImport by remember { mutableStateOf<Importacion.Resultado?>(null) }
 
-    /** Agrega registros importados, sin repetir los que ya existen (misma sección, fecha y abscisas). */
-    fun agregarImportados(r: Importacion.Resultado): Int {
-        val existentes = db.registros().map { Importacion.clave(it) }.toSet()
-        val nuevos = r.registros.filter { Importacion.clave(it) !in existentes }
+    /** Agrega los registros nuevos y actualiza los que ya existen (misma sección, fecha y abscisas). */
+    fun aplicarImportados(r: Importacion.Resultado): Importacion.Fusion {
+        val f = Importacion.fusionar(db.registros(), r.registros)
         if (r.seccionesNuevas.isNotEmpty()) {
             proyecto = proyecto.copy(secciones = proyecto.secciones + r.seccionesNuevas)
             Ajustes.guardarProyecto(ctx, proyecto)
         }
-        db.agregar(nuevos)
-        return nuevos.size
+        db.agregar(f.nuevos)
+        db.actualizar(f.actualizados)
+        return f
     }
 
     // Primera apertura: carga el avance ya ejecutado que viene con la app (assets/avance_inicial.csv)
     LaunchedEffect(Unit) {
-        if (!Ajustes.avanceInicialCargado(ctx)) {
-            val n = withContext(Dispatchers.IO) {
+        // (o, si ya estaba cargado de una versión anterior, completa esos registros con los datos nuevos)
+        if (Ajustes.avanceInicialAplicado(ctx) < Ajustes.AVANCE_INICIAL) {
+            val f = withContext(Dispatchers.IO) {
                 runCatching {
                     val txt = ctx.assets.open("avance_inicial.csv").use { it.readBytes().toString(Charsets.UTF_8) }
-                    agregarImportados(Importacion.leer(txt, proyecto))
-                }.getOrDefault(-1)
+                    aplicarImportados(Importacion.leer(txt, proyecto))
+                }.getOrNull()
             }
-            Ajustes.marcarAvanceInicial(ctx)
-            if (n > 0) { version++; aviso("Se cargaron $n registros de avance ya ejecutados") }
+            if (f != null) {
+                Ajustes.marcarAvanceInicial(ctx)
+                version++
+                val partes = listOfNotNull(
+                    if (f.nuevos.isNotEmpty()) "se cargaron ${f.nuevos.size} registros" else null,
+                    if (f.actualizados.isNotEmpty()) "se actualizaron ${f.actualizados.size} registros" else null
+                )
+                if (partes.isNotEmpty()) aviso("Avance ejecutado: " + partes.joinToString(" y "))
+            }
         }
         // Copia automática del día en Descargas/ControlGeomembrana (sobrevive a una desinstalación)
         withContext(Dispatchers.IO) { runCatching { Autocopia.siToca(ctx, db) } }
@@ -237,7 +245,7 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
     val pestana = when (ruta) { "informes" -> "informes"; "mas", "config" -> "mas"; "estadisticas" -> "informes"; else -> "inicio" }
     val interna = ruta == "estadisticas" || ruta == "config"
     BackHandler(enabled = ruta != "inicio") { ruta = if (interna) pestana else "inicio" }
-    val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
+    val versionApp = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
 
     Scaffold(
         topBar = {
@@ -286,7 +294,7 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
             "informes" -> ContenidoInformes(proyecto, registros, pad,
                 alReporteDia = { reporteDia(it) }, alInformeGeneral = { preguntarFotos = true }, alExcel = { excel() },
                 alEstadisticas = { ruta = "estadisticas" })
-            "mas" -> ContenidoMas(pad, Autocopia.ultima(ctx), version,
+            "mas" -> ContenidoMas(pad, Autocopia.ultima(ctx), versionApp,
                 alCopiaAhora = {
                     trabajando = "Guardando copia en Descargas…"
                     scope.launch {
@@ -322,14 +330,15 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
         )
     }
     resultadoImport?.let { r ->
-        val existentes = registros.map { Importacion.clave(it) }.toSet()
-        val nuevos = r.registros.count { Importacion.clave(it) !in existentes }
+        val fusion = remember(r, registros) { Importacion.fusionar(registros, r.registros) }
+        val nuevos = fusion.nuevos.size
+        val cambios = fusion.actualizados.size
         AlertDialog(
             onDismissRequest = { resultadoImport = null },
             title = { Text("Importar avance") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("${r.registros.size} registros leídos · $nuevos nuevos · ${r.registros.size - nuevos} ya estaban.", fontSize = 15.sp)
+                    Text("${r.registros.size} registros leídos: $nuevos nuevos, $cambios para actualizar y ${fusion.iguales} sin cambios.", fontSize = 16.sp)
                     r.registros.groupBy { it.seccion }.forEach { (sec, l) ->
                         Text("• $sec: ${l.size} registros, ${Fmt.num(l.sumOf { it.longitud })} m, ${Fmt.num(l.sumOf { it.area ?: 0.0 }, 2)} m²", fontSize = 14.sp)
                     }
@@ -340,10 +349,11 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(enabled = nuevos > 0, onClick = {
+                TextButton(enabled = nuevos + cambios > 0, onClick = {
                     resultadoImport = null
-                    val n = agregarImportados(r); version++; aviso("Se importaron $n registros")
-                }) { Text("Importar $nuevos") }
+                    val f = aplicarImportados(r); version++
+                    aviso("Listo: ${f.nuevos.size} nuevos y ${f.actualizados.size} actualizados")
+                }) { Text("Importar", fontSize = 16.sp) }
             },
             dismissButton = { TextButton(onClick = { resultadoImport = null }) { Text("Cancelar") } }
         )

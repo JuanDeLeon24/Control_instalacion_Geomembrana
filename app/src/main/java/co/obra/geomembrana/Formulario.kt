@@ -126,8 +126,7 @@ fun PantallaFormulario(
     }
     var ajustarArea by rememberSaveable(registroId) { mutableStateOf(original?.areaManual != null) }
     var areaManual by rememberSaveable(registroId) { mutableStateOf(txt(original?.areaManual, 2)) }
-    var rollos by rememberSaveable(registroId) { mutableStateOf(original?.rollos?.joinToString("\n") ?: "") }
-    var rolloNuevo by rememberSaveable(registroId) { mutableStateOf("") }
+    var numRollos by rememberSaveable(registroId) { mutableStateOf(original?.numRollos?.toString() ?: "") }
     var notas by rememberSaveable(registroId) { mutableStateOf(original?.notas ?: "") }
     var intento by rememberSaveable(registroId) { mutableStateOf(false) }
     var confirmarBorrar by remember { mutableStateOf(false) }
@@ -144,7 +143,6 @@ fun PantallaFormulario(
     val areaCalc = if (longitud != null && perim != null) longitud * perim else null
     val area = if (ajustarArea) Fmt.leer(areaManual) else areaCalc
     val minutos = Horas.diff(horaIni, horaFin)
-    val listaRollos = rollos.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
     val traslapos = if (ini != null && fin != null && errores.isEmpty()) Calc.traslapos(ini, fin, deLaSeccion, registroId) else emptyList()
     val sec = p.seccion(seccion)
 
@@ -158,7 +156,7 @@ fun PantallaFormulario(
             absIni = ini, absFin = fin, horaIni = horaIni, horaFin = horaFin,
             longitudManual = if (ajustar) Fmt.leer(longManual) else null, perimetro = perim,
             areaManual = if (ajustarArea) Fmt.leer(areaManual) else null,
-            rollos = listaRollos,
+            rollos = original?.rollos ?: emptyList(), numRollos = numRollos.toIntOrNull(),
             // Control de calidad retirado de la app: se conservan los valores que ya tuviera el registro
             tempCuna = original?.tempCuna, velSoldadura = original?.velSoldadura,
             prueba = original?.prueba ?: Prueba.NA, geotextil = original?.geotextil ?: Geotextil.OK,
@@ -344,7 +342,7 @@ fun PantallaFormulario(
 
                 // ---------------- 3. Horario y personal ----------------
                 2 -> {
-                    Ayuda("Toca \"Ahora\" cuando empiece y cuando termine el trabajo. Si no lo sabes, puedes dejarlo vacío.")
+                    Ayuda("Toca \"Ahora\" cuando empiece y cuando termine el trabajo, o toca la hora para escogerla.")
                     CampoHora("Hora de inicio", horaIni, { horaIni = it })
                     Spacer(Modifier.height(12.dp))
                     CampoHora("Hora de fin", horaFin, { horaFin = it })
@@ -357,21 +355,14 @@ fun PantallaFormulario(
                     Pregunta("¿Quién reporta?")
                     Campo("Responsable (nombre)", responsable, { responsable = it })
                     Campo("Cuadrilla (opcional)", cuadrilla, { cuadrilla = it })
-                    Pregunta("Rollos usados (opcional)")
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Campo("Código del rollo", rolloNuevo, { rolloNuevo = it.uppercase() }, Modifier.weight(1f))
-                        Spacer(Modifier.padding(4.dp))
-                        BotonGrande("Agregar", {
-                            val c = rolloNuevo.trim()
-                            if (c.isNotEmpty() && c !in listaRollos) rollos = (listaRollos + c).joinToString("\n")
-                            rolloNuevo = ""
-                        })
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listaRollos.forEach { c ->
-                            InputChip(selected = false, onClick = { rollos = (listaRollos - c).joinToString("\n") },
-                                label = { Text(c, fontSize = 16.sp) }, trailingIcon = { Icon(Icons.Filled.Close, "Quitar") })
-                        }
+                    Pregunta("¿Cuántos rollos se usaron?")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val n = numRollos.toIntOrNull() ?: 0
+                        OutlinedButton(onClick = { numRollos = if (n <= 1) "" else (n - 1).toString() },
+                            modifier = Modifier.size(64.dp)) { Text("–", fontSize = 28.sp) }
+                        Campo("Rollos", numRollos, { numRollos = it.filter { c -> c.isDigit() }.take(3) }, Modifier.weight(1f),
+                            numerico = true, sufijo = "und")
+                        OutlinedButton(onClick = { numRollos = (n + 1).toString() }, modifier = Modifier.size(64.dp)) { Text("+", fontSize = 28.sp) }
                     }
                 }
 
@@ -394,6 +385,7 @@ fun PantallaFormulario(
                             FilaResumen("Longitud × perímetro", "${Fmt.num(longitud)} m × ${Fmt.num(perim)} m") { paso = 1 }
                             FilaResumen("Horario", if (minutos != null) "$horaIni a $horaFin (${Fmt.duracion(minutos.toDouble())})" else "Sin horario") { paso = 2 }
                             FilaResumen("Responsable", responsable.ifBlank { "Sin nombre" }) { paso = 2 }
+                            FilaResumen("Rollos", numRollos.ifBlank { "Sin dato" } + if (numRollos.isNotBlank()) " und" else "") { paso = 2 }
                             FilaResumen("Fotos del día", "${db.fotosDe(fecha).size} de 4") { paso = 3 }
                         }
                     }

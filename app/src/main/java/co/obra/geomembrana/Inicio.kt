@@ -113,6 +113,7 @@ fun ContenidoInicio(
                         Text(T.fechaLarga(d.fecha), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                         Calc.metricas(d.registros, p).forEach { g ->
                             Text("${g.nombre}: ${Fmt.num(g.total.longitud)} m · ${Fmt.num(g.total.area, 2)} m²" +
+                                (if (g.total.rollos > 0) " · ${g.total.rollos} rollos" else "") +
                                 (if (g.total.minutos > 0) " · ${Fmt.duracion(g.total.minutos.toDouble())}" else ""),
                                 fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                         }
@@ -150,7 +151,7 @@ private fun TarjetaRegistro(r: Registro, p: Proyecto, alTocar: () -> Unit) {
                 if (r.horaIni.isNotBlank() || r.horaFin.isNotBlank()) "${r.horaIni}–${r.horaFin}" else null,
                 r.minutos?.takeIf { it > 0 }?.let { Fmt.duracion(it.toDouble()) },
                 r.responsable.ifBlank { null },
-                if (r.rollos.isNotEmpty()) "Rollos: ${r.rollos.joinToString(", ")}" else null
+                r.numRollos?.let { "$it rollos" }
             )
             if (partes.isNotEmpty()) Text(partes.joinToString("  ·  "), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (r.notas.isNotBlank()) Text(r.notas, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 3)

@@ -72,7 +72,8 @@ fun ContenidoEstadisticas(p: Proyecto, registros: List<Registro>, pad: PaddingVa
             val turnos = Calc.porTurno(regs)
             Linea("Días con instalación", "${porFecha.size}")
             Linea("Promedio por día", if (porFecha.isEmpty()) "–" else "${Fmt.num(rend.longitud / porFecha.size)} m · ${Fmt.num(rend.area / porFecha.size, 1)} m²")
-            Linea("Turnos registrados", "${turnos.size}")
+            Linea("Turnos registrados", "${turnos.size} (${turnos.count { it.turno == Turnos.DIA }} día · ${turnos.count { it.turno == Turnos.NOCHE }} noche)")
+            Linea("Rollos usados", "${rend.rollos} und" + if (rend.rollos > 0 && rend.area > 0) " · ${Fmt.num(rend.area / rend.rollos, 1)} m²/rollo" else "")
             if (rend.minutos > 0) {
                 Linea("Horas trabajadas (registros con horario)", Fmt.duracion(rend.minutos.toDouble()))
                 Linea("Rendimiento por hora", "${Fmt.num(rend.mPorHora)} m/h · ${Fmt.num(rend.m2PorHora, 1)} m²/h", true)
@@ -109,7 +110,7 @@ fun ContenidoEstadisticas(p: Proyecto, registros: List<Registro>, pad: PaddingVa
                 Column(Modifier.padding(vertical = 4.dp)) {
                     Row {
                         Text(T.fechaCorta(d.fecha), fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        Text("${Fmt.num(r.longitud)} m · ${Fmt.num(r.area, 2)} m²", fontSize = 14.sp)
+                        Text("${Fmt.num(r.longitud)} m · ${Fmt.num(r.area, 2)} m²" + if (r.rollos > 0) " · ${r.rollos} rollos" else "", fontSize = 14.sp)
                     }
                     Barra((r.area / max).toFloat())
                 }
@@ -127,13 +128,6 @@ fun ContenidoEstadisticas(p: Proyecto, registros: List<Registro>, pad: PaddingVa
                     Barra((c.area / max).toFloat(), MaterialTheme.colorScheme.primary)
                 }
             }
-        }
-
-        val rollos = Calc.porRollo(regs)
-        if (rollos.isNotEmpty()) Bloque("Rollos (${rollos.size})") {
-            rollos.forEach { r -> Linea(r.codigo, "${r.registros} reg. · ${Fmt.num(r.longitud)} m · ${Fmt.num(r.area, 1)} m²") }
-            Text("Si un registro usa varios rollos, su longitud y área se reparten por igual entre ellos.",
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         Bloque("Tramos pendientes y traslapos") {

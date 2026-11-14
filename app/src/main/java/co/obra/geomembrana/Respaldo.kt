@@ -24,7 +24,7 @@ object Respaldo {
         .put("responsable", r.responsable).put("cuadrilla", r.cuadrilla)
         .put("absIni", r.absIni).put("absFin", r.absFin).put("horaIni", r.horaIni).put("horaFin", r.horaFin)
         .put("longitudManual", num(r.longitudManual)).put("perimetro", num(r.perimetro)).put("areaManual", num(r.areaManual))
-        .put("rollos", JSONArray(r.rollos)).put("tempCuna", num(r.tempCuna)).put("velSoldadura", num(r.velSoldadura))
+        .put("rollos", JSONArray(r.rollos)).put("numRollos", r.numRollos ?: JSONObject.NULL).put("tempCuna", num(r.tempCuna)).put("velSoldadura", num(r.velSoldadura))
         .put("prueba", r.prueba.name).put("geotextil", r.geotextil.name).put("notas", r.notas).put("creado", r.creado)
 
     private fun JSONObject.txt(k: String): String = if (isNull(k)) "" else optString(k, "")
@@ -40,6 +40,7 @@ object Respaldo {
             horaIni = o.txt("horaIni"), horaFin = o.txt("horaFin"),
             longitudManual = o.dbl("longitudManual"), perimetro = o.dbl("perimetro"), areaManual = o.dbl("areaManual"),
             rollos = (0 until rollos.length()).map { rollos.getString(it) },
+            numRollos = if (o.has("numRollos") && !o.isNull("numRollos")) o.optInt("numRollos") else null,
             tempCuna = o.dbl("tempCuna"), velSoldadura = o.dbl("velSoldadura"),
             prueba = Prueba.de(o.txt("prueba")), geotextil = Geotextil.de(o.txt("geotextil")),
             notas = o.txt("notas"), creado = o.txt("creado")
