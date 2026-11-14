@@ -62,8 +62,7 @@ import java.time.LocalDate
 private fun txt(d: Double?, dec: Int = 3): String = d?.let { Fmt.num(it, dec).replace(".", "") } ?: ""
 
 /**
- * Nuevo registro o edición. [registroId] ya existe aunque el registro aún no esté guardado,
- * para poder asociar las fotos desde el primer momento.
+ * Nuevo registro o edición. Las fotos son de la jornada (la fecha elegida), no del registro.
  */
 @Composable
 fun PantallaFormulario(
@@ -71,15 +70,18 @@ fun PantallaFormulario(
     alGuardar: (Registro) -> Unit, alEliminar: () -> Unit, alCancelar: () -> Unit, aviso: (String) -> Unit
 ) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     val ult = remember { Ajustes.ultimos(ctx) }
-    val cob = remember(registros) { Calc.cobertura(registros, p) }
-    val siguiente = cob.pendientes.firstOrNull()?.ini
 
     var fecha by rememberSaveable(registroId) { mutableStateOf(original?.fecha ?: T.hoy()) }
     var turno by rememberSaveable(registroId) { mutableStateOf(original?.turno ?: T.turnoActual()) }
+    val activas = p.secciones.filter { !it.terminada }.ifEmpty { p.secciones }
+    var seccion by rememberSaveable(registroId) {
+        mutableStateOf(original?.seccion ?: (p.seccion(ult.seccion)?.takeIf { !it.terminada } ?: activas.first()).nombre)
+    }
     var responsable by rememberSaveable(registroId) { mutableStateOf(original?.responsable ?: ult.responsable) }
     var cuadrilla by rememberSaveable(registroId) { mutableStateOf(original?.cuadrilla ?: ult.cuadrilla) }
+    val deLaSeccion = remember(registros, seccion) { Calc.deSeccion(registros, seccion) }
+    val siguiente = remember(deLaSeccion) { Calc.siguiente(deLaSeccion) }
     var absIni by rememberSaveable(registroId) {
         mutableStateOf(original?.let { Abscisa.texto(it.absIni) } ?: siguiente?.let { Abscisa.texto(it) } ?: "")
     }
@@ -89,8 +91,10 @@ fun PantallaFormulario(
     var ajustar by rememberSaveable(registroId) { mutableStateOf(original?.longitudManual != null) }
     var longManual by rememberSaveable(registroId) { mutableStateOf(txt(original?.longitudManual)) }
     var perimetro by rememberSaveable(registroId) {
-        mutableStateOf(original?.let { txt(it.perimetro) } ?: ult.perimetro.ifBlank { txt(p.perimetroDefecto) })
+        mutableStateOf(original?.let { txt(it.perimetro) } ?: txt(p.seccion(seccion)?.perimetro))
     }
+    var ajustarArea by rememberSaveable(registroId) { mutableStateOf(original?.areaManual != null) }
+    var areaManual by rememberSaveable(registroId) { mutableStateOf(txt(original?.areaManual, 2)) }
     var rollos by rememberSaveable(registroId) { mutableStateOf(original?.rollos?.joinToString("\n") ?: "") }
     var rolloNuevo by rememberSaveable(registroId) { mutableStateOf("") }
     var temp by rememberSaveable(registroId) { mutableStateOf(txt(original?.tempCuna, 1)) }
@@ -102,59 +106,37 @@ fun PantallaFormulario(
     var confirmarBorrar by remember { mutableStateOf(false) }
     var confirmarSalir by remember { mutableStateOf(false) }
 
-    // ---------- Fotos ----------
-    var versionFotos by remember { mutableIntStateOf(0) }
-    val fotos = remember(versionFotos, registroId) { db.fotosDe(registroId) }
-    var momentoPendiente by rememberSaveable { mutableStateOf<String?>(null) }
-    var verMomento by remember { mutableStateOf<Momento?>(null) }
-
-    fun procesar(trabajo: () -> Foto?) {
-        scope.launch {
-            val f = withContext(Dispatchers.IO) { runCatching { trabajo() }.getOrNull() }
-            if (f != null) { versionFotos++; aviso("Foto guardada: ${f.momento.corto}") } else aviso("No se pudo leer la foto")
-        }
-    }
-    val tomarFoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        val m = momentoPendiente?.let { runCatching { Momento.valueOf(it) }.getOrNull() }
-        if (ok && m != null) procesar { Fotos.desdeCaptura(ctx, registroId, m, db) }
-    }
-    val galeria = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        val m = momentoPendiente?.let { runCatching { Momento.valueOf(it) }.getOrNull() }
-        if (uri != null && m != null) procesar { Fotos.desdeUri(ctx, uri, registroId, m, db) }
-    }
-    fun camara(m: Momento) {
-        momentoPendiente = m.name; verMomento = null
-        val f = Fotos.captura(ctx); f.delete()
-        try { tomarFoto.launch(uriDe(ctx, f)) } catch (e: ActivityNotFoundException) { aviso("No se encontró una app de cámara") }
-    }
-    fun desdeGaleria(m: Momento) { momentoPendiente = m.name; verMomento = null; galeria.launch("image/*") }
-
     // ---------- Cálculos en vivo ----------
     val ini = Abscisa.leer(absIni)
     val fin = Abscisa.leer(absFin)
-    val errores = Calc.errores(ini, fin, p)
-    val longAbs = if (ini != null && fin != null && fin > ini) fin - ini else null
+    val errores = Calc.errores(ini, fin)
+    val fueraRango = Calc.fueraDeRango(ini, fin, p)
+    val longAbs = if (ini != null && fin != null) kotlin.math.abs(fin - ini) else null
     val longitud = if (ajustar) Fmt.leer(longManual) else longAbs
     val perim = Fmt.leer(perimetro)
-    val area = if (longitud != null && perim != null) longitud * perim else null
+    val areaCalc = if (longitud != null && perim != null) longitud * perim else null
+    val area = if (ajustarArea) Fmt.leer(areaManual) else areaCalc
     val minutos = Horas.diff(horaIni, horaFin)
     val listaRollos = rollos.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
-    val traslapos = if (ini != null && fin != null && fin > ini) Calc.traslapos(ini, fin, registros, registroId) else emptyList()
+    val traslapos = if (ini != null && fin != null && errores.isEmpty()) Calc.traslapos(ini, fin, deLaSeccion, registroId) else emptyList()
 
     fun construir(): Registro? {
         if (errores.isNotEmpty() || ini == null || fin == null) return null
         if (ajustar && (Fmt.leer(longManual) ?: -1.0) <= 0.0) return null
+        if (ajustarArea && (Fmt.leer(areaManual) ?: -1.0) <= 0.0) return null
         return Registro(
-            id = registroId, fecha = fecha, turno = turno, responsable = responsable.trim(), cuadrilla = cuadrilla.trim(),
+            id = registroId, fecha = fecha, turno = turno, seccion = seccion,
+            responsable = responsable.trim(), cuadrilla = cuadrilla.trim(),
             absIni = ini, absFin = fin, horaIni = horaIni, horaFin = horaFin,
             longitudManual = if (ajustar) Fmt.leer(longManual) else null, perimetro = perim,
+            areaManual = if (ajustarArea) Fmt.leer(areaManual) else null,
             rollos = listaRollos, tempCuna = Fmt.leer(temp), velSoldadura = Fmt.leer(vel),
             prueba = Prueba.valueOf(prueba), geotextil = Geotextil.valueOf(geotextil), notas = notas.trim(),
             creado = original?.creado ?: T.marca()
         )
     }
 
-    fun salir() { if (original == null && fotos.isEmpty() && absFin.isBlank()) alCancelar() else confirmarSalir = true }
+    fun salir() { if (original == null && absFin.isBlank()) alCancelar() else confirmarSalir = true }
     BackHandler { salir() }
 
     Scaffold(
@@ -175,7 +157,7 @@ fun PantallaFormulario(
         Column(
             Modifier.fillMaxSize().padding(pad).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)
         ) {
-            Seccion("Fecha y turno") {
+            Bloque("Fecha y turno") {
                 OutlinedButton(
                     onClick = {
                         val d = runCatching { LocalDate.parse(fecha) }.getOrDefault(LocalDate.now())
@@ -189,17 +171,29 @@ fun PantallaFormulario(
                 Campo("Cuadrilla (opcional)", cuadrilla, { cuadrilla = it })
             }
 
-            Seccion("Tramo instalado") {
-                Campo("Abscisa inicial", absIni, { absIni = it }, ayuda = ini?.let { "= ${Fmt.num(it)} m" } ?: "Ej. K6+176.57",
-                    error = intentoGuardar && (ini == null || errores.any { it.contains("inicial") }))
-                if (siguiente != null && original == null && Abscisa.leer(absIni) != siguiente) {
-                    TextButton(onClick = { absIni = Abscisa.texto(siguiente) }) { Text("Usar siguiente pendiente: ${Abscisa.texto(siguiente)}") }
+            Bloque("Sección instalada") {
+                Opciones(p.secciones.map { it.nombre }, seccion, { n ->
+                    val s = p.seccion(n); n + (s?.let { " (${Fmt.num(it.perimetro)} m)" } ?: "") + (if (s?.terminada == true) " ✓" else "")
+                }) { n ->
+                    seccion = n
+                    p.seccion(n)?.let { perimetro = txt(it.perimetro) }
+                    if (original == null) Calc.siguiente(Calc.deSeccion(registros, n))?.let { absIni = Abscisa.texto(it) }
                 }
-                Campo("Abscisa final", absFin, { absFin = it }, ayuda = fin?.let { "= ${Fmt.num(it)} m" } ?: "Ej. K6+190.00",
-                    error = intentoGuardar && (fin == null || errores.any { it.contains("final") }))
-                Text("Túnel: ${Abscisa.texto(p.absIni)} a ${Abscisa.texto(p.absFin)} (${Fmt.num(p.longitudTotal)} m)",
+                if (p.seccion(seccion)?.terminada == true) Etiqueta("Esta sección está marcada como terminada", 1)
+            }
+
+            Bloque("Tramo instalado") {
+                Campo("Abscisa inicial", absIni, { absIni = it }, ayuda = ini?.let { "= ${Fmt.num(it)} m" } ?: "Ej. K6+512.39",
+                    error = intentoGuardar && ini == null)
+                if (siguiente != null && original == null && Abscisa.leer(absIni) != siguiente) {
+                    TextButton(onClick = { absIni = Abscisa.texto(siguiente) }) { Text("Continuar donde terminó el último: ${Abscisa.texto(siguiente)}") }
+                }
+                Campo("Abscisa final", absFin, { absFin = it }, ayuda = fin?.let { "= ${Fmt.num(it)} m" } ?: "Ej. K6+507.00",
+                    error = intentoGuardar && (fin == null || errores.isNotEmpty()))
+                Text("Túnel: ${Abscisa.texto(p.absIni)} a ${Abscisa.texto(p.absFin)} (${Fmt.num(p.longitudTotal)} m). Se puede avanzar en cualquier sentido.",
                     fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (ini != null && fin != null) errores.forEach { Etiqueta(it, 2); Spacer(Modifier.height(4.dp)) }
+                fueraRango?.let { Etiqueta(it, 1); Spacer(Modifier.height(4.dp)) }
                 traslapos.forEach { (r, t) ->
                     Etiqueta("Se traslapa ${Fmt.num(t.longitud)} m con el registro del ${T.fechaCorta(r.fecha)} ${r.turno} " +
                         "(${Abscisa.texto(r.absIni)} – ${Abscisa.texto(r.absFin)})", 1)
@@ -221,11 +215,21 @@ fun PantallaFormulario(
                     error = intentoGuardar && (Fmt.leer(longManual) ?: -1.0) <= 0.0)
                 Campo("Perímetro instalado (desarrollo de la sección)", perimetro, { perimetro = it }, numerico = true, sufijo = "m")
                 Kpi("Área cubierta en este registro", if (area != null) "${Fmt.fijo(area)} m²" else "–",
-                    if (longitud != null && perim != null) "${Fmt.num(longitud)} m × ${Fmt.num(perim)} m" else "Longitud × perímetro",
+                    if (ajustarArea) "Cantidad oficial (calculada: ${Fmt.fijo(areaCalc)} m²)"
+                    else if (longitud != null && perim != null) "${Fmt.num(longitud)} m × ${Fmt.num(perim)} m" else "Longitud × perímetro",
                     Modifier.fillMaxWidth().padding(top = 6.dp), destacado = true)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("Usar cantidad oficial (m²) distinta", fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Switch(checked = ajustarArea, onCheckedChange = {
+                        ajustarArea = it
+                        if (it && areaManual.isBlank()) areaManual = txt(areaCalc, 2)
+                    })
+                }
+                if (ajustarArea) Campo("Cantidad oficial", areaManual, { areaManual = it }, numerico = true, sufijo = "m²",
+                    error = intentoGuardar && (Fmt.leer(areaManual) ?: -1.0) <= 0.0)
             }
 
-            Seccion("Horario de la actividad") {
+            Bloque("Horario de la actividad") {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CampoHora("Hora de inicio", horaIni, { horaIni = it }, Modifier.weight(1f))
                     CampoHora("Hora de fin", horaFin, { horaFin = it }, Modifier.weight(1f))
@@ -239,7 +243,7 @@ fun PantallaFormulario(
                 }
             }
 
-            Seccion("Rollos utilizados") {
+            Bloque("Rollos utilizados") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Campo("Código del rollo", rolloNuevo, { rolloNuevo = it.uppercase() }, Modifier.weight(1f))
                     Spacer(Modifier.padding(4.dp))
@@ -259,7 +263,7 @@ fun PantallaFormulario(
                 Text("${listaRollos.size} rollo(s)", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
-            Seccion("Parámetros de calidad") {
+            Bloque("Parámetros de calidad") {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Campo("Temp. cuña / extrusora", temp, { temp = it }, Modifier.weight(1f), numerico = true, sufijo = "°C",
                         ayuda = rangoTexto(p.tempMin, p.tempMax))
@@ -273,19 +277,11 @@ fun PantallaFormulario(
                 construir()?.let { r -> Calc.alertas(r, p).filter { !it.startsWith("Longitud") }.forEach { Etiqueta(it, 2); Spacer(Modifier.height(4.dp)) } }
             }
 
-            Seccion("Fotos de la jornada (${fotos.size}/4)") {
-                Text("Una al inicio, dos en momentos intermedios y una al final.", fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
-                Momento.entries.chunked(2).forEach { par ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 10.dp)) {
-                        par.forEach { m ->
-                            CasillaFoto(m, fotos[m], { if (fotos[m] == null) camara(m) else verMomento = m }, Modifier.weight(1f))
-                        }
-                    }
-                }
+            Bloque("Fotos de la jornada") {
+                FotosJornada(db, fecha, aviso)
             }
 
-            Seccion("Notas / observaciones") {
+            Bloque("Notas / observaciones") {
                 Campo("Interferencias, demoras por sostenimiento, filtraciones…", notas, { notas = it }, lineas = 3)
             }
 
@@ -301,40 +297,17 @@ fun PantallaFormulario(
     }
 
     // ---------- Diálogos ----------
-    verMomento?.let { m ->
-        val f = fotos[m]
-        val img = Miniatura(f, 1400)
-        AlertDialog(
-            onDismissRequest = { verMomento = null },
-            title = { Text(m.etiqueta) },
-            text = {
-                Column {
-                    if (img != null) Image(img, m.etiqueta, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp))
-                    f?.let { Text("Tomada: ${T.marcaCorta(it.tomada)}", fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-                        OutlinedButton(onClick = { camara(m) }) { Text("Cámara") }
-                        OutlinedButton(onClick = { desdeGaleria(m) }) { Text("Galería") }
-                        OutlinedButton(onClick = { f?.let { compartir(ctx, Fotos.archivo(ctx, it), "image/jpeg") } }) { Text("Compartir") }
-                        OutlinedButton(onClick = {
-                            f?.let { Fotos.quitar(ctx, it, db) }; verMomento = null; versionFotos++
-                        }) { Text("Borrar", color = MaterialTheme.colorScheme.error) }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { verMomento = null }) { Text("Cerrar") } }
-        )
-    }
     if (confirmarBorrar) AlertDialog(
         onDismissRequest = { confirmarBorrar = false },
         title = { Text("¿Eliminar este registro?") },
-        text = { Text("Se borran también sus fotos. Esta acción no se puede deshacer.") },
+        text = { Text("Esta acción no se puede deshacer. Las fotos de la jornada se conservan.") },
         confirmButton = { TextButton(onClick = { confirmarBorrar = false; alEliminar() }) { Text("Eliminar", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = { confirmarBorrar = false }) { Text("Cancelar") } }
     )
     if (confirmarSalir) AlertDialog(
         onDismissRequest = { confirmarSalir = false },
         title = { Text("¿Salir sin guardar?") },
-        text = { Text(if (original == null) "Se perderán los datos y las fotos de este registro nuevo." else "Se perderán los cambios (las fotos ya quedaron guardadas).") },
+        text = { Text("Se perderán los datos sin guardar. Las fotos de la jornada ya quedaron guardadas.") },
         confirmButton = { TextButton(onClick = { confirmarSalir = false; alCancelar() }) { Text("Salir", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = { confirmarSalir = false }) { Text("Seguir editando") } }
     )

@@ -13,7 +13,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * Fotos de la jornada (inicio, dos intermedias y final) de cada registro.
+ * Fotos de la jornada (inicio, dos intermedias y final) de cada reporte diario.
  * Se guardan reducidas (lado mayor 1600 px, JPEG) en filesDir/fotos/.
  */
 object Fotos {
@@ -62,38 +62,34 @@ object Fotos {
         return Bitmap.createBitmap(b, 0, 0, b.width, b.height, m, true)
     }
 
-    private fun guardar(ctx: Context, abrir: () -> InputStream?, registroId: String, momento: Momento, db: Db): Foto? {
+    private fun guardar(ctx: Context, abrir: () -> InputStream?, jornada: String, momento: Momento, db: Db): Foto? {
         val bruto = decodificar(abrir, LADO) ?: return null
         val recto = enderezar(bruto, orientacion(abrir))
         val esc = minOf(1f, LADO.toFloat() / maxOf(recto.width, recto.height))
         val fin = if (esc < 1f) Bitmap.createScaledBitmap(recto, (recto.width * esc).toInt(), (recto.height * esc).toInt(), true) else recto
-        val nombre = "${registroId}_${momento.name}_${System.currentTimeMillis()}.jpg"
+        val nombre = "${jornada}_${momento.name}_${System.currentTimeMillis()}.jpg"
         FileOutputStream(File(dir(ctx), nombre)).use { fin.compress(Bitmap.CompressFormat.JPEG, 85, it) }
         // Borra la foto anterior de ese momento, si había
-        db.fotosDe(registroId)[momento]?.let { archivo(ctx, it).delete() }
-        val foto = Foto(registroId, momento, nombre, leerFecha(abrir) ?: T.marca())
+        db.fotosDe(jornada)[momento]?.let { archivo(ctx, it).delete() }
+        val foto = Foto(jornada, momento, nombre, leerFecha(abrir) ?: T.marca())
         db.guardarFoto(foto)
         return foto
     }
 
-    fun desdeCaptura(ctx: Context, registroId: String, momento: Momento, db: Db): Foto? {
+    fun desdeCaptura(ctx: Context, jornada: String, momento: Momento, db: Db): Foto? {
         val f = captura(ctx)
         if (!f.exists() || f.length() == 0L) return null
-        val r = guardar(ctx, { f.inputStream() }, registroId, momento, db)
+        val r = guardar(ctx, { f.inputStream() }, jornada, momento, db)
         f.delete()
         return r
     }
 
-    fun desdeUri(ctx: Context, uri: Uri, registroId: String, momento: Momento, db: Db): Foto? =
-        guardar(ctx, { ctx.contentResolver.openInputStream(uri) }, registroId, momento, db)
+    fun desdeUri(ctx: Context, uri: Uri, jornada: String, momento: Momento, db: Db): Foto? =
+        guardar(ctx, { ctx.contentResolver.openInputStream(uri) }, jornada, momento, db)
 
     fun quitar(ctx: Context, f: Foto, db: Db) {
         archivo(ctx, f).delete()
-        db.quitarFoto(f.registroId, f.momento)
-    }
-
-    fun quitarTodas(ctx: Context, registroId: String, db: Db) {
-        db.fotosDe(registroId).values.forEach { archivo(ctx, it).delete() }
+        db.quitarFoto(f.jornada, f.momento)
     }
 
     /** Imagen reducida para mostrar en pantalla o en el PDF. */

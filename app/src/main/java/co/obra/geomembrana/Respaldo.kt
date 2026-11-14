@@ -20,10 +20,10 @@ object Respaldo {
     private fun num(d: Double?): Any = d ?: JSONObject.NULL
 
     fun registroAJson(r: Registro): JSONObject = JSONObject()
-        .put("id", r.id).put("fecha", r.fecha).put("turno", r.turno)
+        .put("id", r.id).put("fecha", r.fecha).put("turno", r.turno).put("seccion", r.seccion)
         .put("responsable", r.responsable).put("cuadrilla", r.cuadrilla)
         .put("absIni", r.absIni).put("absFin", r.absFin).put("horaIni", r.horaIni).put("horaFin", r.horaFin)
-        .put("longitudManual", num(r.longitudManual)).put("perimetro", num(r.perimetro))
+        .put("longitudManual", num(r.longitudManual)).put("perimetro", num(r.perimetro)).put("areaManual", num(r.areaManual))
         .put("rollos", JSONArray(r.rollos)).put("tempCuna", num(r.tempCuna)).put("velSoldadura", num(r.velSoldadura))
         .put("prueba", r.prueba.name).put("geotextil", r.geotextil.name).put("notas", r.notas).put("creado", r.creado)
 
@@ -34,10 +34,11 @@ object Respaldo {
         val rollos = o.optJSONArray("rollos") ?: JSONArray()
         return Registro(
             id = o.getString("id"), fecha = o.getString("fecha"), turno = o.txt("turno").ifBlank { Turnos.DIA },
+            seccion = o.txt("seccion"),
             responsable = o.txt("responsable"), cuadrilla = o.txt("cuadrilla"),
             absIni = o.getDouble("absIni"), absFin = o.getDouble("absFin"),
             horaIni = o.txt("horaIni"), horaFin = o.txt("horaFin"),
-            longitudManual = o.dbl("longitudManual"), perimetro = o.dbl("perimetro"),
+            longitudManual = o.dbl("longitudManual"), perimetro = o.dbl("perimetro"), areaManual = o.dbl("areaManual"),
             rollos = (0 until rollos.length()).map { rollos.getString(it) },
             tempCuna = o.dbl("tempCuna"), velSoldadura = o.dbl("velSoldadura"),
             prueba = Prueba.de(o.txt("prueba")), geotextil = Geotextil.de(o.txt("geotextil")),
@@ -47,11 +48,11 @@ object Respaldo {
 
     fun exportar(ctx: Context, db: Db, salida: OutputStream) {
         val fotos = db.fotos()
-        val json = JSONObject().put("app", APP).put("version", 1).put("creado", T.marca())
+        val json = JSONObject().put("app", APP).put("version", 2).put("creado", T.marca())
             .put("proyecto", Ajustes.proyectoAJson(Ajustes.proyecto(ctx)))
             .put("registros", JSONArray().apply { db.registros().forEach { put(registroAJson(it)) } })
             .put("fotos", JSONArray().apply {
-                fotos.forEach { put(JSONObject().put("registroId", it.registroId).put("momento", it.momento.name)
+                fotos.forEach { put(JSONObject().put("jornada", it.jornada).put("momento", it.momento.name)
                     .put("archivo", it.archivo).put("tomada", it.tomada)) }
             })
         ZipOutputStream(salida).use { z ->
@@ -90,7 +91,7 @@ object Respaldo {
             (0 until a.length()).mapNotNull { i ->
                 val f = a.getJSONObject(i)
                 val m = runCatching { Momento.valueOf(f.getString("momento")) }.getOrNull() ?: return@mapNotNull null
-                Foto(f.getString("registroId"), m, f.getString("archivo"), f.optString("tomada"))
+                Foto(f.getString("jornada"), m, f.getString("archivo"), f.optString("tomada"))
             }
         } ?: emptyList()
         val validas = fotos.filter { File(tmp, it.archivo).exists() }

@@ -146,6 +146,53 @@ data class PorCuadrilla(
     val m2PorHora: Double?
 )
 
+/** Estado de una sección: cobertura, área, rendimiento y proyección. */
+data class AvanceSeccion(
+    val seccion: Seccion,
+    val registros: List<Registro>,
+    val cobertura: Cobertura,
+    val rend: Rendimiento,
+    val eta: Eta
+) {
+    val terminada: Boolean get() = seccion.terminada || eta.completado
+    /** Fracción avanzada (1.0 si la sección se marcó como terminada). */
+    val porcentaje: Double get() = if (seccion.terminada) 1.0 else cobertura.porcentaje
+    val areaTotal: Double get() = seccion.perimetro * cobertura.total
+}
+
+/** Grupo de secciones (p. ej. Bota = HD + HI) con sus totales. */
+data class AvanceGrupo(val nombre: String, val secciones: List<AvanceSeccion>) {
+    val registros: List<Registro> get() = secciones.flatMap { it.registros }
+    val rend: Rendimiento get() = Calc.rendimiento(registros)
+    val areaTotal: Double get() = secciones.sumOf { it.areaTotal }
+    /** Área equivalente cubierta (perímetro × metros cubiertos, o el total si la sección está terminada). */
+    val areaCubierta: Double get() = secciones.sumOf { it.porcentaje * it.areaTotal }
+    val porcentaje: Double get() = if (areaTotal > 0) areaCubierta / areaTotal else 0.0
+    val terminada: Boolean get() = secciones.all { it.terminada }
+    /** Metros lineales pendientes, sumando todas las secciones del grupo. */
+    val pendiente: Double get() = secciones.filter { !it.seccion.terminada }.sumOf { it.cobertura.restante }
+    /** El grupo termina cuando termina su última sección. */
+    val etaFecha: java.time.LocalDateTime? get() =
+        if (secciones.any { !it.terminada && it.eta.fechaHora == null }) null
+        else secciones.mapNotNull { it.eta.fechaHora }.maxOrNull()
+}
+
+/** Métricas de un conjunto de registros (una jornada o todo el proyecto) para un grupo y sus secciones. */
+data class MetricasGrupo(val nombre: String, val total: Rendimiento, val porSeccion: List<Pair<Seccion, Rendimiento>>)
+
+data class PuntoCurva(val fecha: java.time.LocalDate, val metros: Double)
+
+/** Curva S de una sección: avance real acumulado y avance proyectado según los rendimientos. */
+data class CurvaS(
+    val seccion: Seccion,
+    val total: Double,
+    val real: List<PuntoCurva>,
+    val proyReciente: List<PuntoCurva>,   // con el promedio de los últimos turnos
+    val proyPromedio: List<PuntoCurva>,   // con el promedio de todos los turnos
+    val mPorDiaReciente: Double?,
+    val mPorDiaPromedio: Double?
+)
+
 data class Calidad(
     val conTemp: Int, val tempProm: Double?, val tempMin: Double?, val tempMax: Double?, val tempFuera: Int?,
     val conVel: Int, val velProm: Double?, val velMin: Double?, val velMax: Double?, val velFuera: Int?,
@@ -160,15 +207,20 @@ object Calc {
     // ---------- Validación ----------
 
     /** Errores que impiden guardar el registro. */
-    fun errores(absIni: Double?, absFin: Double?, p: Proyecto): List<String> {
+    fun errores(absIni: Double?, absFin: Double?): List<String> {
         val e = mutableListOf<String>()
-        val rango = "${Abscisa.texto(p.absIni)} a ${Abscisa.texto(p.absFin)}"
-        if (absIni == null) e += "Abscisa inicial no válida (ej. K6+176.57)."
-        else if (absIni < p.absIni - EPS || absIni > p.absFin + EPS) e += "La abscisa inicial está fuera del túnel ($rango)."
-        if (absFin == null) e += "Abscisa final no válida (ej. K6+190.00)."
-        else if (absFin < p.absIni - EPS || absFin > p.absFin + EPS) e += "La abscisa final está fuera del túnel ($rango)."
-        if (absIni != null && absFin != null && absFin <= absIni + EPS) e += "La abscisa final debe ser mayor que la inicial."
+        if (absIni == null) e += "Abscisa inicial no válida (ej. K7+173.35)."
+        if (absFin == null) e += "Abscisa final no válida (ej. K7+153.00)."
+        if (absIni != null && absFin != null && abs(absFin - absIni) < 0.005) e += "La abscisa final debe ser distinta de la inicial."
         return e
+    }
+
+    /** Aviso (no impide guardar) si el tramo se sale del túnel configurado. */
+    fun fueraDeRango(absIni: Double?, absFin: Double?, p: Proyecto): String? {
+        val fuera = listOfNotNull(absIni, absFin).filter { it < p.absIni - 0.005 || it > p.absFin + 0.005 }
+        if (fuera.isEmpty()) return null
+        return "Fuera del túnel configurado (${Abscisa.texto(p.absIni)} a ${Abscisa.texto(p.absFin)}): " +
+            fuera.joinToString(", ") { Abscisa.texto(it) } + ". Lo que sobresale no cuenta en el avance."
     }
 
     /** Fuera de especificación: lista de textos para mostrar como alerta. */
@@ -184,8 +236,7 @@ object Calc {
         }
         if (r.prueba == Prueba.NO_APROBADO) a += "Prueba de presión no aprobada"
         if (r.geotextil == Geotextil.OBSERVACIONES) a += "Geotextil con observaciones"
-        if (r.geotextil == Geotextil.NO_INSPECCIONADO) a += "Geotextil no inspeccionado"
-        if (r.longitudManual != null && abs(r.longitudManual - r.longitudAbscisas) > 0.005)
+        if (r.longitudManual != null && abs(r.longitudManual - r.longitudAbscisas) > 0.015)
             a += "Longitud ajustada (${Fmt.num(r.longitudManual)} m vs ${Fmt.num(r.longitudAbscisas)} m por abscisas)"
         return a
     }
@@ -197,43 +248,53 @@ object Calc {
         val res = mutableListOf<Tramo>()
         for (t in orden) {
             val u = res.lastOrNull()
-            if (u != null && t.ini <= u.fin + EPS) res[res.size - 1] = Tramo(u.ini, max(u.fin, t.fin))
+            if (u != null && t.ini <= u.fin + 0.005) res[res.size - 1] = Tramo(u.ini, max(u.fin, t.fin))
             else res += t
         }
         return res
     }
 
+    /** Cobertura de UNA sección (pasar solo los registros de esa sección). */
     fun cobertura(registros: List<Registro>, p: Proyecto): Cobertura {
-        val recortados = registros.map { Tramo(max(it.absIni, p.absIni), min(it.absFin, p.absFin)) }
+        val recortados = registros.map { Tramo(max(it.desde, p.absIni), min(it.hasta, p.absFin)) }
         val tramos = unir(recortados)
         val pendientes = mutableListOf<Tramo>()
         var cursor = p.absIni
         for (t in tramos) {
-            if (t.ini > cursor + EPS) pendientes += Tramo(cursor, t.ini)
+            if (t.ini > cursor + 0.005) pendientes += Tramo(cursor, t.ini)
             cursor = max(cursor, t.fin)
         }
-        if (p.absFin > cursor + EPS) pendientes += Tramo(cursor, p.absFin)
+        if (p.absFin > cursor + 0.005) pendientes += Tramo(cursor, p.absFin)
         return Cobertura(tramos.sumOf { it.longitud }, tramos, pendientes, p.longitudTotal)
     }
 
-    /** Registros (distintos de [excepto]) que se traslapan con el intervalo dado. */
-    fun traslapos(absIni: Double, absFin: Double, registros: List<Registro>, excepto: String? = null): List<Pair<Registro, Tramo>> =
-        registros.filter { it.id != excepto }.mapNotNull { r ->
-            val a = max(absIni, r.absIni); val b = min(absFin, r.absFin)
-            if (b - a > 0.005) r to Tramo(a, b) else null
+    fun deSeccion(registros: List<Registro>, seccion: String): List<Registro> =
+        registros.filter { Texto.clave(it.seccion) == Texto.clave(seccion) }
+
+    /** Registros de la misma sección (distintos de [excepto]) que se traslapan con el intervalo dado. */
+    fun traslapos(absIni: Double, absFin: Double, registros: List<Registro>, excepto: String? = null): List<Pair<Registro, Tramo>> {
+        val d = min(absIni, absFin); val h = max(absIni, absFin)
+        return registros.filter { it.id != excepto }.mapNotNull { r ->
+            val a = max(d, r.desde); val b = min(h, r.hasta)
+            if (b - a > 0.015) r to Tramo(a, b) else null
+        }
+    }
+
+    fun todosLosTraslapos(registros: List<Registro>): List<Traslapo> =
+        registros.groupBy { Texto.clave(it.seccion) }.values.flatMap { lista ->
+            val orden = lista.sortedBy { it.desde }
+            val res = mutableListOf<Traslapo>()
+            for (i in orden.indices) for (k in i + 1 until orden.size) {
+                val a = orden[i]; val b = orden[k]
+                if (b.desde >= a.hasta) break
+                val ini = max(a.desde, b.desde); val fin = min(a.hasta, b.hasta)
+                if (fin - ini > 0.015) res += Traslapo(a, b, Tramo(ini, fin))
+            }
+            res
         }
 
-    fun todosLosTraslapos(registros: List<Registro>): List<Traslapo> {
-        val orden = registros.sortedBy { it.absIni }
-        val res = mutableListOf<Traslapo>()
-        for (i in orden.indices) for (k in i + 1 until orden.size) {
-            val a = orden[i]; val b = orden[k]
-            if (b.absIni >= a.absFin) break
-            val ini = max(a.absIni, b.absIni); val fin = min(a.absFin, b.absFin)
-            if (fin - ini > 0.005) res += Traslapo(a, b, Tramo(ini, fin))
-        }
-        return res
-    }
+    /** Abscisa donde debería empezar el siguiente registro de la sección: donde terminó el último. */
+    fun siguiente(registros: List<Registro>): Double? = ordenar(registros).lastOrNull()?.absFin
 
     // ---------- Rendimiento ----------
 
@@ -241,7 +302,6 @@ object Calc {
         val conHoras = registros.filter { (it.minutos ?: 0) > 0 }
         val min = conHoras.sumOf { it.minutos ?: 0 }
         val horas = min / 60.0
-        val longHoras = conHoras.sumOf { it.longitud }
         val conArea = conHoras.filter { it.area != null }
         val minArea = conArea.sumOf { it.minutos ?: 0 }
         return Rendimiento(
@@ -249,13 +309,13 @@ object Calc {
             longitud = registros.sumOf { it.longitud },
             area = registros.sumOf { it.area ?: 0.0 },
             minutos = min,
-            mPorHora = if (horas > 0) longHoras / horas else null,
+            mPorHora = if (horas > 0) conHoras.sumOf { it.longitud } / horas else null,
             m2PorHora = if (minArea > 0) conArea.sumOf { it.area ?: 0.0 } / (minArea / 60.0) else null
         )
     }
 
     fun ordenar(registros: List<Registro>): List<Registro> =
-        registros.sortedWith(compareBy({ it.fecha }, { Turnos.orden(it.turno) }, { Horas.aMin(it.horaIni) ?: 0 }, { it.absIni }))
+        registros.sortedWith(compareBy({ it.fecha }, { Turnos.orden(it.turno) }, { Horas.aMin(it.horaIni) ?: 0 }, { it.creado }))
 
     fun porTurno(registros: List<Registro>): List<PorTurno> =
         ordenar(registros).groupBy { it.fecha to it.turno }
@@ -265,8 +325,42 @@ object Calc {
     fun porFecha(registros: List<Registro>): List<PorFecha> =
         ordenar(registros).groupBy { it.fecha }.map { (k, v) -> PorFecha(k, v) }.sortedBy { it.fecha }
 
-    /** Área total del túnel a cubrir con el perímetro de referencia (null si no hay perímetro). */
-    fun areaTotal(p: Proyecto): Double? = p.perimetroDefecto?.let { it * p.longitudTotal }
+    // ---------- Secciones ----------
+
+    /** Avance de cada sección configurada (y de las que aparezcan en los registros sin estar configuradas). */
+    fun porSeccion(registros: List<Registro>, p: Proyecto): List<AvanceSeccion> {
+        val extra = registros.map { it.seccion }.distinctBy { Texto.clave(it) }
+            .filter { p.seccion(it) == null }
+            .map { n -> Seccion(n, deSeccion(registros, n).firstNotNullOfOrNull { it.perimetro } ?: 0.0) }
+        return (p.secciones + extra).map { s ->
+            val regs = deSeccion(registros, s.nombre)
+            val cob = cobertura(regs, p)
+            val eta = if (s.terminada) Eta(true, 0.0, 0, null, null, null, 0.0, 0.0, null) else eta(regs, p, cob)
+            AvanceSeccion(s, regs, cob, rendimiento(regs), eta)
+        }
+    }
+
+    fun porGrupo(secciones: List<AvanceSeccion>): List<AvanceGrupo> =
+        secciones.groupBy { Texto.clave(it.seccion.grupoEfectivo) }.values.map { AvanceGrupo(it.first().seccion.grupoEfectivo, it) }
+
+    /** Métricas por grupo y sección de un conjunto de registros (solo grupos con registros). */
+    fun metricas(registros: List<Registro>, p: Proyecto): List<MetricasGrupo> {
+        val secs = porSeccion(registros, p).map { it.seccion }
+        return secs.groupBy { Texto.clave(it.grupoEfectivo) }.values.mapNotNull { grupo ->
+            val partes = grupo.map { s -> s to deSeccion(registros, s.nombre) }.filter { it.second.isNotEmpty() }
+            if (partes.isEmpty()) null
+            else MetricasGrupo(grupo.first().grupoEfectivo, rendimiento(partes.flatMap { it.second }), partes.map { it.first to rendimiento(it.second) })
+        }
+    }
+
+    /** Área total del túnel a cubrir: suma de perímetro × longitud de todas las secciones. */
+    fun areaTotal(p: Proyecto): Double = p.secciones.sumOf { it.perimetro } * p.longitudTotal
+
+    /** Avance global ponderado por área (cada sección pesa según su perímetro). */
+    fun avanceGlobal(secciones: List<AvanceSeccion>): Double {
+        val total = secciones.sumOf { it.areaTotal }
+        return if (total > 0) secciones.sumOf { it.porcentaje * it.areaTotal } / total else 0.0
+    }
 
     // ---------- Proyección de término ----------
 
@@ -282,7 +376,7 @@ object Calc {
     }
 
     /**
-     * Fecha y hora estimadas de terminación.
+     * Fecha y hora estimadas de terminación de UNA sección (pasar solo sus registros).
      * Velocidad = promedio de metros por turno en los últimos [Proyecto.turnosParaEta] turnos registrados.
      * Desde el último turno registrado se cuentan los turnos que faltan (1 o 2 por día según la configuración);
      * en el último turno parcial se suma la fracción de las horas trabajadas en promedio por turno.
@@ -318,6 +412,57 @@ object Calc {
         return Eta(false, restante, ultimos.size, mPorTurno, rend.mPorHora, horasPorTurno, faltan, faltan / porDia, fechaHora)
     }
 
+    // ---------- Curva S ----------
+
+    private fun proyectar(desde: PuntoCurva, mPorDia: Double?, total: Double): List<PuntoCurva> {
+        if (mPorDia == null || mPorDia <= EPS || desde.metros >= total - 0.005) return emptyList()
+        val res = mutableListOf(desde)
+        var k = 1L
+        while (k <= 3650) {
+            val v = desde.metros + k * mPorDia
+            if (v >= total - 0.005) {
+                // Último punto: día (fraccionario) en que se alcanza el total, redondeado al día siguiente
+                res += PuntoCurva(desde.fecha.plusDays(k), total)
+                break
+            }
+            res += PuntoCurva(desde.fecha.plusDays(k), v)
+            k++
+        }
+        return res
+    }
+
+    /**
+     * Curva S de una sección hasta la fecha [corte] (inclusive; null = todo).
+     * Real: metros cubiertos acumulados (sin traslapos) al final de cada día con registros.
+     * Proyectada: desde el último punto real, metros por día = metros por turno × turnos por día,
+     * con el promedio de los últimos turnos (reciente) y con el de todos los turnos (promedio).
+     */
+    fun curvaS(registros: List<Registro>, s: Seccion, p: Proyecto, corte: String? = null): CurvaS {
+        val regs = ordenar(deSeccion(registros, s.nombre)).filter { corte == null || it.fecha <= corte }
+        val total = p.longitudTotal
+        val fechas = regs.map { it.fecha }.distinct().mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.sorted()
+        val real = mutableListOf<PuntoCurva>()
+        if (fechas.isNotEmpty()) {
+            real += PuntoCurva(fechas.first().minusDays(1), 0.0)
+            fechas.forEach { f ->
+                val hasta = f.toString()
+                real += PuntoCurva(f, cobertura(regs.filter { it.fecha <= hasta }, p).cubierto)
+            }
+        }
+        val porDia = if (p.turnosPorDia >= 2) 2 else 1
+        val turnos = porTurno(regs)
+        val reciente = turnos.takeLast(max(1, p.turnosParaEta)).takeIf { it.isNotEmpty() }?.let { u -> u.sumOf { it.longitud } / u.size * porDia }
+        val promedio = turnos.takeIf { it.isNotEmpty() }?.let { u -> u.sumOf { it.longitud } / u.size * porDia }
+        val ultimo = real.lastOrNull()
+        val terminada = s.terminada || (ultimo != null && ultimo.metros >= total - 0.005)
+        return CurvaS(
+            s, total, real,
+            if (ultimo == null || terminada) emptyList() else proyectar(ultimo, reciente, total),
+            if (ultimo == null || terminada) emptyList() else proyectar(ultimo, promedio, total),
+            reciente, promedio
+        )
+    }
+
     // ---------- Desgloses ----------
 
     fun porRollo(registros: List<Registro>): List<PorRollo> {
@@ -340,7 +485,7 @@ object Calc {
         registros.groupBy { nombreCuadrilla(it) }.map { (k, v) ->
             val r = rendimiento(v)
             PorCuadrilla(k, v.map { it.fecha to it.turno }.distinct().size, v.size, r.longitud, r.area, r.minutos, r.mPorHora, r.m2PorHora)
-        }.sortedByDescending { it.longitud }
+        }.sortedByDescending { it.area }
 
     fun calidad(registros: List<Registro>, p: Proyecto): Calidad {
         val t = registros.mapNotNull { it.tempCuna }

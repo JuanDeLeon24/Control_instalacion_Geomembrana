@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -114,14 +116,33 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
     var preguntarFotos by remember { mutableStateOf(false) }
     var confirmarRestaurar by remember { mutableStateOf(false) }
 
-    // Al abrir la app: borra fotos que quedaron de registros nuevos que no se guardaron
-    // (no si la actividad se recreó con un registro nuevo abierto, p. ej. al volver de la cámara)
-    LaunchedEffect(Unit) {
-        if (!ruta.startsWith("nuevo:")) withContext(Dispatchers.IO) {
-            val ids = db.registros().map { it.id }.toSet()
-            db.fotos().filter { it.registroId !in ids }.forEach { Fotos.quitar(ctx, it, db) }
+    var fotosDia by remember { mutableStateOf<String?>(null) }
+    var resultadoImport by remember { mutableStateOf<Importacion.Resultado?>(null) }
+
+    /** Agrega registros importados, sin repetir los que ya existen (misma sección, fecha y abscisas). */
+    fun agregarImportados(r: Importacion.Resultado): Int {
+        val existentes = db.registros().map { Importacion.clave(it) }.toSet()
+        val nuevos = r.registros.filter { Importacion.clave(it) !in existentes }
+        if (r.seccionesNuevas.isNotEmpty()) {
+            proyecto = proyecto.copy(secciones = proyecto.secciones + r.seccionesNuevas)
+            Ajustes.guardarProyecto(ctx, proyecto)
         }
-        version++
+        db.agregar(nuevos)
+        return nuevos.size
+    }
+
+    // Primera apertura: carga el avance ya ejecutado que viene con la app (assets/avance_inicial.csv)
+    LaunchedEffect(Unit) {
+        if (!Ajustes.avanceInicialCargado(ctx)) {
+            val n = withContext(Dispatchers.IO) {
+                runCatching {
+                    val txt = ctx.assets.open("avance_inicial.csv").use { it.readBytes().toString(Charsets.UTF_8) }
+                    agregarImportados(Importacion.leer(txt, proyecto))
+                }.getOrDefault(-1)
+            }
+            Ajustes.marcarAvanceInicial(ctx)
+            if (n > 0) { version++; aviso("Se cargaron $n registros de avance ya ejecutados") }
+        }
     }
 
     fun generar(etiqueta: String, mime: String, trabajo: () -> File) {
@@ -169,6 +190,17 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
             }
         }
     }
+    val importarCsv = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            val r = runCatching {
+                withContext(Dispatchers.IO) {
+                    val txt = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+                    Importacion.leer(txt, proyecto)
+                }
+            }
+            r.onSuccess { resultadoImport = it }.onFailure { aviso("No se pudo leer el archivo") }
+        }
+    }
     val elegirLogo = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) { if (Logo.guardar(ctx, uri)) { hayLogo = true; aviso("Logo actualizado") } else aviso("No se pudo leer esa imagen") }
     }
@@ -181,13 +213,10 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
             db = db, p = proyecto, registros = registros, original = original, registroId = id,
             alGuardar = { r ->
                 db.guardar(r); Ajustes.recordar(ctx, r); version++; ruta = "inicio"
-                aviso("Registro guardado: ${Fmt.num(r.longitud)} m · ${Fmt.num(r.area, 1)} m²")
+                aviso("Registro guardado: ${r.seccion} ${Fmt.num(r.longitud)} m · ${Fmt.num(r.area, 2)} m²")
             },
-            alEliminar = { Fotos.quitarTodas(ctx, id, db); db.eliminar(id); version++; ruta = "inicio"; aviso("Registro eliminado") },
-            alCancelar = {
-                if (original == null) { db.fotosDe(id).values.forEach { Fotos.quitar(ctx, it, db) } }
-                version++; ruta = "inicio"
-            },
+            alEliminar = { db.eliminar(id); version++; ruta = "inicio"; aviso("Registro eliminado") },
+            alCancelar = { version++; ruta = "inicio" },
             aviso = ::aviso
         )
         Overlays(trabajando, null, {}, {}, {}, {}, snack)
@@ -212,6 +241,10 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
                         DropdownMenuItem(text = { Text("Informe de avance (PDF)") }, onClick = { menu = false; preguntarFotos = true })
                         DropdownMenuItem(text = { Text("Exportar a Excel") }, onClick = { menu = false; excel() })
                         DropdownMenuItem(text = { Text("Estadísticas y proyección") }, onClick = { menu = false; ruta = "estadisticas" })
+                        HorizontalDivider()
+                        DropdownMenuItem(text = { Text("Importar avance (CSV / texto)") }, onClick = {
+                            menu = false; importarCsv.launch(arrayOf("text/*", "application/csv", "application/vnd.ms-excel", "application/octet-stream"))
+                        })
                         HorizontalDivider()
                         DropdownMenuItem(text = { Text("Guardar copia de seguridad") }, onClick = {
                             menu = false; exportarCopia.launch("Geomembrana_copia_${T.hoy()}.zip")
@@ -245,8 +278,9 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
                 alElegirLogo = { elegirLogo.launch("image/*") },
                 alQuitarLogo = { Logo.quitar(ctx); hayLogo = Logo.cargar(ctx) != null; aviso("Logo quitado") })
             else -> ContenidoInicio(
-                proyecto, registros, fotos.groupBy { it.registroId }.mapValues { it.value.size }, pad,
-                alAbrir = { ruta = "editar:" + it.id }, alReporteDia = { reporteDia(it) }, alEstadisticas = { ruta = "estadisticas" }
+                proyecto, registros, fotos.groupBy { it.jornada }.mapValues { it.value.size }, pad,
+                alAbrir = { ruta = "editar:" + it.id }, alReporteDia = { reporteDia(it) }, alFotosDia = { fotosDia = it },
+                alEstadisticas = { ruta = "estadisticas" }
             )
         }
     }
@@ -256,10 +290,45 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
         { l -> if (l.mime == MIME_PDF) guardarPdf.launch(l.archivo.name) else guardarXlsx.launch(l.archivo.name) },
         { listo = null }, null)
 
+    fotosDia?.let { dia ->
+        AlertDialog(
+            onDismissRequest = { fotosDia = null; version++ },
+            title = { Text("Fotos de la jornada") },
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) { FotosJornada(db, dia, ::aviso) { version++ } } },
+            confirmButton = { TextButton(onClick = { fotosDia = null; version++ }) { Text("Listo") } }
+        )
+    }
+    resultadoImport?.let { r ->
+        val existentes = registros.map { Importacion.clave(it) }.toSet()
+        val nuevos = r.registros.count { Importacion.clave(it) !in existentes }
+        AlertDialog(
+            onDismissRequest = { resultadoImport = null },
+            title = { Text("Importar avance") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("${r.registros.size} registros leídos · $nuevos nuevos · ${r.registros.size - nuevos} ya estaban.", fontSize = 15.sp)
+                    r.registros.groupBy { it.seccion }.forEach { (sec, l) ->
+                        Text("• $sec: ${l.size} registros, ${Fmt.num(l.sumOf { it.longitud })} m, ${Fmt.num(l.sumOf { it.area ?: 0.0 }, 2)} m²", fontSize = 14.sp)
+                    }
+                    if (r.seccionesNuevas.isNotEmpty()) Text("Secciones nuevas: " + r.seccionesNuevas.joinToString { "${it.nombre} (${Fmt.num(it.perimetro)} m)" },
+                        fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp))
+                    r.errores.take(15).forEach { Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.error) }
+                    if (r.errores.size > 15) Text("… y ${r.errores.size - 15} errores más", fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = nuevos > 0, onClick = {
+                    resultadoImport = null
+                    val n = agregarImportados(r); version++; aviso("Se importaron $n registros")
+                }) { Text("Importar $nuevos") }
+            },
+            dismissButton = { TextButton(onClick = { resultadoImport = null }) { Text("Cancelar") } }
+        )
+    }
     if (preguntarFotos) AlertDialog(
         onDismissRequest = { preguntarFotos = false },
         title = { Text("Informe de avance") },
-        text = { Text("¿Incluir el anexo con las fotos de todos los registros? El archivo puede quedar pesado.") },
+        text = { Text("Incluye el avance global y por grupo (Bóveda / Bota), curva S y desgloses. ¿Agregar el anexo con las fotos de todas las jornadas? El archivo puede quedar pesado.") },
         confirmButton = { TextButton(onClick = { preguntarFotos = false; informe(true) }) { Text("Con fotos") } },
         dismissButton = { TextButton(onClick = { preguntarFotos = false; informe(false) }) { Text("Sin fotos") } }
     )

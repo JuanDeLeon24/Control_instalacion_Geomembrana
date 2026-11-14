@@ -16,7 +16,7 @@ import java.util.UUID
 
 enum class ModoTema(val etiqueta: String) { SISTEMA("Según el teléfono"), CLARO("Claro (sol directo)"), OSCURO("Oscuro (túnel)") }
 
-data class Ultimos(val responsable: String, val cuadrilla: String, val perimetro: String)
+data class Ultimos(val responsable: String, val cuadrilla: String, val seccion: String)
 
 /** Configuración del proyecto y preferencias, guardadas en el teléfono. */
 object Ajustes {
@@ -25,7 +25,9 @@ object Ajustes {
     fun proyectoAJson(p: Proyecto): JSONObject = JSONObject()
         .put("nombre", p.nombre).put("empresa", p.empresa).put("titulo", p.titulo)
         .put("codigoFormato", p.codigoFormato).put("absIni", p.absIni).put("absFin", p.absFin)
-        .put("perimetroDefecto", p.perimetroDefecto ?: JSONObject.NULL)
+        .put("secciones", org.json.JSONArray().apply {
+            p.secciones.forEach { put(JSONObject().put("nombre", it.nombre).put("perimetro", it.perimetro).put("terminada", it.terminada).put("grupo", it.grupo)) }
+        })
         .put("turnosPorDia", p.turnosPorDia).put("horaInicioDia", p.horaInicioDia)
         .put("horaInicioNoche", p.horaInicioNoche).put("turnosParaEta", p.turnosParaEta)
         .put("tempMin", p.tempMin ?: JSONObject.NULL).put("tempMax", p.tempMax ?: JSONObject.NULL)
@@ -39,7 +41,11 @@ object Ajustes {
             nombre = o.optString("nombre", d.nombre), empresa = o.optString("empresa", d.empresa),
             titulo = o.optString("titulo", d.titulo), codigoFormato = o.optString("codigoFormato", d.codigoFormato),
             absIni = o.dbl("absIni") ?: d.absIni, absFin = o.dbl("absFin") ?: d.absFin,
-            perimetroDefecto = if (o.has("perimetroDefecto")) o.dbl("perimetroDefecto") else d.perimetroDefecto,
+            secciones = o.optJSONArray("secciones")?.let { a ->
+                (0 until a.length()).map { i -> a.getJSONObject(i) }.map {
+                    Seccion(it.optString("nombre"), it.optDouble("perimetro", 0.0).takeIf { v -> !v.isNaN() } ?: 0.0, it.optBoolean("terminada", false), it.optString("grupo", ""))
+                }.filter { it.nombre.isNotBlank() }
+            }?.takeIf { it.isNotEmpty() } ?: d.secciones,
             turnosPorDia = o.optInt("turnosPorDia", d.turnosPorDia),
             horaInicioDia = o.optString("horaInicioDia", d.horaInicioDia),
             horaInicioNoche = o.optString("horaInicioNoche", d.horaInicioNoche),
@@ -59,13 +65,17 @@ object Ajustes {
     fun guardarTema(ctx: Context, m: ModoTema) { sp(ctx).edit().putString("tema", m.name).apply() }
 
     fun ultimos(ctx: Context): Ultimos = sp(ctx).let {
-        Ultimos(it.getString("responsable", "") ?: "", it.getString("cuadrilla", "") ?: "", it.getString("perimetro", "") ?: "")
+        Ultimos(it.getString("responsable", "") ?: "", it.getString("cuadrilla", "") ?: "", it.getString("seccion", "") ?: "")
     }
 
     fun recordar(ctx: Context, r: Registro) {
         sp(ctx).edit().putString("responsable", r.responsable).putString("cuadrilla", r.cuadrilla)
-            .putString("perimetro", r.perimetro?.let { Fmt.num(it, 3) } ?: "").apply()
+            .putString("seccion", r.seccion).apply()
     }
+
+    /** El avance inicial incluido en la app se carga una sola vez, en la primera apertura. */
+    fun avanceInicialCargado(ctx: Context): Boolean = sp(ctx).getBoolean("avance_inicial", false)
+    fun marcarAvanceInicial(ctx: Context) { sp(ctx).edit().putBoolean("avance_inicial", true).apply() }
 }
 
 object T {

@@ -37,7 +37,15 @@ fun ContenidoConfiguracion(
     var codigo by rememberSaveable { mutableStateOf(p.codigoFormato) }
     var absIni by rememberSaveable { mutableStateOf(Abscisa.texto(p.absIni)) }
     var absFin by rememberSaveable { mutableStateOf(Abscisa.texto(p.absFin)) }
-    var perim by rememberSaveable { mutableStateOf(t(p.perimetroDefecto)) }
+    // Secciones codificadas como texto para sobrevivir a la rotación: nombre|perímetro|terminada|grupo por línea
+    var secciones by rememberSaveable {
+        mutableStateOf(p.secciones.joinToString("\n") { "${it.nombre}|${t(it.perimetro)}|${it.terminada}|${it.grupo}" })
+    }
+    val filas = secciones.split("\n").filter { it.isNotEmpty() }.map { it.split("|") + List(4) { "" } }
+    fun cambiar(i: Int, k: Int, v: String) {
+        secciones = filas.mapIndexed { j, f -> (if (j == i) f.take(4).toMutableList().also { it[k] = v.replace("|", "/").replace("\n", " ") } else f.take(4)).joinToString("|") }
+            .joinToString("\n")
+    }
     var turnosDia by rememberSaveable { mutableStateOf(p.turnosPorDia) }
     var hDia by rememberSaveable { mutableStateOf(p.horaInicioDia) }
     var hNoche by rememberSaveable { mutableStateOf(p.horaInicioNoche) }
@@ -51,19 +59,39 @@ fun ContenidoConfiguracion(
     val ini = Abscisa.leer(absIni); val fin = Abscisa.leer(absFin)
 
     Column(Modifier.fillMaxSize().padding(pad).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
-        Seccion("Proyecto") {
+        Bloque("Proyecto") {
             Campo("Nombre del túnel / proyecto", nombre, { nombre = it })
             Campo("Empresa", empresa, { empresa = it })
             Campo("Título del informe", titulo, { titulo = it })
             Campo("Código del formato", codigo, { codigo = it })
         }
-        Seccion("Geometría") {
+        Bloque("Geometría") {
             Campo("Abscisa inicial del túnel", absIni, { absIni = it }, ayuda = ini?.let { "= ${Fmt.num(it)} m" } ?: "Ej. K6+176.57", error = ini == null)
             Campo("Abscisa final del túnel", absFin, { absFin = it }, ayuda = fin?.let { "= ${Fmt.num(it)} m" } ?: "Ej. K7+173.00", error = fin == null)
             if (ini != null && fin != null && fin > ini) Text("Longitud total: ${Fmt.fijo(fin - ini)} m", fontSize = 16.sp)
-            Campo("Perímetro de referencia (se propone en cada registro)", perim, { perim = it }, numerico = true, sufijo = "m")
         }
-        Seccion("Turnos y proyección") {
+        Bloque("Secciones de geomembrana") {
+            Text("Cada sección avanza por separado. Las del mismo grupo se reportan juntas (ej. Bota = HD + HI). " +
+                "Marca “Terminada” cuando la sección se entrega completa.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            filas.forEachIndexed { i, f ->
+                androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Campo("Nombre", f[0], { cambiar(i, 0, it) }, Modifier.weight(1.4f))
+                    Campo("Perímetro", f[1], { cambiar(i, 1, it) }, Modifier.weight(1f), numerico = true, sufijo = "m")
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Campo("Grupo", f[3], { cambiar(i, 3, it) }, Modifier.weight(1f))
+                    Text("Terminada", fontSize = 14.sp)
+                    androidx.compose.material3.Switch(checked = f[2] == "true", onCheckedChange = { cambiar(i, 2, it.toString()) })
+                    androidx.compose.material3.TextButton(onClick = {
+                        secciones = filas.filterIndexed { j, _ -> j != i }.joinToString("\n") { it.take(4).joinToString("|") }
+                    }) { Text("Quitar", color = MaterialTheme.colorScheme.error) }
+                }
+            }
+            OutlinedButton(onClick = { secciones = (if (secciones.isBlank()) "" else secciones + "\n") + "Nueva sección||false|" },
+                modifier = Modifier.padding(top = 8.dp)) { Text("Agregar sección") }
+        }
+        Bloque("Turnos y proyección") {
             Text("Turnos por día", style = MaterialTheme.typography.labelLarge)
             Opciones(listOf(1, 2), turnosDia, { if (it == 1) "1 (solo día)" else "2 (día y noche)" }) { turnosDia = it }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -72,7 +100,7 @@ fun ContenidoConfiguracion(
             }
             Campo("Turnos que se promedian para la proyección", nEta, { nEta = it.filter { c -> c.isDigit() } }, numerico = true)
         }
-        Seccion("Especificaciones de soldadura") {
+        Bloque("Especificaciones de soldadura") {
             Text("Ajustar según la ficha técnica del fabricante de la geomembrana. Vacío = sin control.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -86,15 +114,19 @@ fun ContenidoConfiguracion(
         }
         error?.let { Etiqueta(it, 2) }
         BotonGrande("Guardar configuración", {
+            val lista = filas.map { f -> Seccion(f[0].trim(), Fmt.leer(f[1]) ?: 0.0, f[2] == "true", f[3].trim()) }
             when {
                 ini == null || fin == null -> error = "Revisa las abscisas del túnel."
+                lista.isEmpty() -> error = "Debe haber al menos una sección."
+                lista.any { it.nombre.isBlank() || it.perimetro <= 0.0 } -> error = "Cada sección necesita nombre y perímetro mayor que cero."
+                lista.map { Texto.clave(it.nombre) }.distinct().size < lista.size -> error = "Hay secciones con el mismo nombre."
                 fin <= ini -> error = "La abscisa final del túnel debe ser mayor que la inicial."
                 else -> {
                     error = null
                     alGuardar(Proyecto(
                         nombre = nombre.trim().ifBlank { "Túnel" }, empresa = empresa.trim(),
                         titulo = titulo.trim().ifBlank { Proyecto().titulo }, codigoFormato = codigo.trim(),
-                        absIni = ini, absFin = fin, perimetroDefecto = Fmt.leer(perim), turnosPorDia = turnosDia,
+                        absIni = ini, absFin = fin, secciones = lista, turnosPorDia = turnosDia,
                         horaInicioDia = hDia.ifBlank { "06:00" }, horaInicioNoche = hNoche.ifBlank { "18:00" },
                         turnosParaEta = (nEta.toIntOrNull() ?: 6).coerceIn(1, 60),
                         tempMin = Fmt.leer(tMin), tempMax = Fmt.leer(tMax), velMin = Fmt.leer(vMin), velMax = Fmt.leer(vMax)
@@ -103,11 +135,11 @@ fun ContenidoConfiguracion(
             }
         }, Modifier.fillMaxWidth().padding(vertical = 10.dp))
 
-        Seccion("Pantalla") {
+        Bloque("Pantalla") {
             Text("Modo de color", style = MaterialTheme.typography.labelLarge)
             Opciones(ModoTema.entries, tema, { it.etiqueta }) { alTema(it) }
         }
-        Seccion("Logo de la empresa (sale en los PDF)") {
+        Bloque("Logo de la empresa (sale en los PDF)") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = alElegirLogo) { Text(if (hayLogo) "Cambiar logo" else "Elegir logo") }
                 if (hayLogo) OutlinedButton(onClick = alQuitarLogo) { Text("Quitar logo") }

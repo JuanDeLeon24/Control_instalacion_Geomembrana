@@ -30,44 +30,58 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Contenido de la pantalla principal: panel de avance + registros agrupados por fecha. */
+/** Tarjeta de avance de un grupo (Bóveda, Bota) con el detalle de sus secciones. */
+@Composable
+fun TarjetaGrupo(g: AvanceGrupo, p: Proyecto, registros: List<Registro>, compacta: Boolean = false) {
+    Bloque(g.nombre + if (g.terminada) "  ✓ terminada" else "") {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(Fmt.pct(g.porcentaje), fontSize = if (compacta) 30.sp else 38.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.padding(6.dp))
+            Text("${Fmt.num(g.rend.area, 1)} m² instalados de ${Fmt.num(g.areaTotal, 0)} m²", fontSize = 15.sp, modifier = Modifier.padding(bottom = 6.dp))
+        }
+        LinearProgressIndicator(progress = { g.porcentaje.toFloat() }, modifier = Modifier.fillMaxWidth().height(10.dp),
+            color = Amarillo, trackColor = MaterialTheme.colorScheme.surfaceVariant)
+        g.secciones.forEach { s ->
+            Spacer(Modifier.height(8.dp))
+            if (g.secciones.size > 1 || s.seccion.nombre != g.nombre) {
+                Text("${s.seccion.nombre} · ${Fmt.num(s.seccion.perimetro)} m · ${Fmt.num(s.cobertura.cubierto)} m (${Fmt.pct(s.porcentaje)})" +
+                    if (s.seccion.terminada) " ✓" else "", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+            FranjaTunel(p, Calc.deSeccion(registros, s.seccion.nombre), alto = if (compacta) 16 else 22)
+        }
+        if (!g.terminada) {
+            val eta = g.etaFecha
+            val sec = g.secciones.filter { !it.terminada }
+            KpiFila(
+                { Kpi("Pendiente", "${Fmt.num(g.pendiente)} m", sec.flatMap { it.cobertura.pendientes }.firstOrNull()?.let { t ->
+                    "${Abscisa.texto(t.ini)} – ${Abscisa.texto(t.fin)}" } ?: "", it) },
+                { Kpi("Terminación estimada", eta?.let { T.fechaHora(it) } ?: "–",
+                    sec.firstNotNullOfOrNull { it.eta.mPorTurno }?.let { m -> "${Fmt.num(m)} m/turno (últimos ${p.turnosParaEta})" } ?: "Sin datos",
+                    it, destacado = true) }
+            )
+        }
+    }
+}
+
+/** Contenido de la pantalla principal: avance por grupo + registros agrupados por fecha. */
 @Composable
 fun ContenidoInicio(
-    p: Proyecto, registros: List<Registro>, fotosPorRegistro: Map<String, Int>, pad: PaddingValues,
-    alAbrir: (Registro) -> Unit, alReporteDia: (String) -> Unit, alEstadisticas: () -> Unit
+    p: Proyecto, registros: List<Registro>, fotosPorDia: Map<String, Int>, pad: PaddingValues,
+    alAbrir: (Registro) -> Unit, alReporteDia: (String) -> Unit, alFotosDia: (String) -> Unit, alEstadisticas: () -> Unit
 ) {
-    val cob = Calc.cobertura(registros, p)
-    val rend = Calc.rendimiento(registros)
-    val eta = Calc.eta(registros, p, cob)
+    val secciones = Calc.porSeccion(registros, p)
+    val grupos = Calc.porGrupo(secciones).sortedBy { it.terminada }   // lo que está en curso, primero
     val dias = Calc.porFecha(registros).reversed()
-    val areaTot = Calc.areaTotal(p)
 
     LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = pad.calculateTopPadding() + 8.dp, bottom = 110.dp)) {
         item {
-            Seccion(p.nombre) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(Fmt.pct(cob.porcentaje), fontSize = 40.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.padding(6.dp))
-                    Text("${Fmt.fijo(cob.cubierto)} de ${Fmt.fijo(cob.total)} m", fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
-                }
-                LinearProgressIndicator(progress = { cob.porcentaje.toFloat() }, modifier = Modifier.fillMaxWidth().height(10.dp),
-                    color = Amarillo, trackColor = MaterialTheme.colorScheme.surfaceVariant)
-                Spacer(Modifier.height(10.dp))
-                FranjaTunel(p, registros)
-                KpiFila(
-                    { Kpi("Área instalada", "${Fmt.num(rend.area, 1)} m²", areaTot?.let { "de ${Fmt.num(it, 0)} m² (${Fmt.pct(rend.area / it)})" } ?: "", it) },
-                    { Kpi("Pendiente", "${Fmt.num(cob.restante)} m", "${cob.pendientes.size} tramo(s)", it) }
-                )
-                KpiFila(
-                    { Kpi("Rendimiento", "${Fmt.num(rend.mPorHora)} m/h", "${Fmt.num(rend.m2PorHora, 1)} m²/h", it) },
-                    { Kpi("Terminación estimada",
-                        if (eta.completado) "Completado" else eta.fechaHora?.let { d -> T.fechaHora(d) } ?: "–",
-                        eta.mPorTurno?.let { m -> "${Fmt.num(m)} m/turno · ${Fmt.num(eta.turnosRestantes, 1)} turnos" } ?: "Registra avances para calcularla",
-                        it, destacado = true) }
-                )
-                OutlinedButton(onClick = alEstadisticas, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                    Text("Ver estadísticas y proyección", fontSize = 16.sp)
-                }
+            Text("${p.nombre} · ${Abscisa.texto(p.absIni)} a ${Abscisa.texto(p.absFin)} · ${Fmt.num(p.longitudTotal)} m",
+                fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+        }
+        items(grupos, key = { "g-" + it.nombre }) { g -> TarjetaGrupo(g, p, registros, compacta = g.terminada) }
+        item {
+            OutlinedButton(onClick = alEstadisticas, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("Estadísticas, curva S y proyección", fontSize = 16.sp)
             }
         }
         if (dias.isEmpty()) item {
@@ -76,30 +90,32 @@ fun ContenidoInicio(
         }
         dias.forEach { d ->
             item(key = "dia-" + d.fecha) {
-                val r = d.rend
+                val nFotos = fotosPorDia[d.fecha] ?: 0
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 4.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(T.fechaLarga(d.fecha), fontSize = 17.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        Text("${Fmt.num(r.longitud)} m  ·  ${Fmt.num(r.area, 1)} m² cubiertos  ·  ${Fmt.duracion(r.minutos.toDouble())}",
-                            fontSize = 15.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        OutlinedButton(onClick = { alReporteDia(d.fecha) }, modifier = Modifier.padding(top = 6.dp)) {
-                            Text("Reporte diario (PDF con fotos)")
+                        Calc.metricas(d.registros, p).forEach { g ->
+                            Text("${g.nombre}: ${Fmt.num(g.total.longitud)} m · ${Fmt.num(g.total.area, 2)} m²" +
+                                (if (g.total.minutos > 0) " · ${Fmt.duracion(g.total.minutos.toDouble())}" else ""),
+                                fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+                            OutlinedButton(onClick = { alFotosDia(d.fecha) }) { Text("Fotos $nFotos/4") }
+                            OutlinedButton(onClick = { alReporteDia(d.fecha) }) { Text("Reporte diario (PDF)") }
                         }
                     }
                 }
             }
-            items(d.registros.sortedWith(compareBy({ Turnos.orden(it.turno) }, { it.absIni })), key = { it.id }) { r ->
-                TarjetaRegistro(r, p, fotosPorRegistro[r.id] ?: 0) { alAbrir(r) }
-            }
+            items(d.registros, key = { it.id }) { r -> TarjetaRegistro(r, p) { alAbrir(r) } }
         }
     }
 }
 
 @Composable
-private fun TarjetaRegistro(r: Registro, p: Proyecto, nFotos: Int, alTocar: () -> Unit) {
+private fun TarjetaRegistro(r: Registro, p: Proyecto, alTocar: () -> Unit) {
     val alertas = Calc.alertas(r, p).filter { !it.startsWith("Longitud") }
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable(onClick = alTocar),
@@ -108,11 +124,13 @@ private fun TarjetaRegistro(r: Registro, p: Proyecto, nFotos: Int, alTocar: () -
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("${Abscisa.texto(r.absIni)} → ${Abscisa.texto(r.absFin)}", fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                Text(r.turno, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(r.seccion, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                Text(r.turno, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Text("${Abscisa.texto(r.absIni)} → ${Abscisa.texto(r.absFin)}", fontSize = 17.sp, fontWeight = FontWeight.Bold)
             Text(
-                "${Fmt.num(r.longitud)} m × ${Fmt.num(r.perimetro)} m = ${Fmt.num(r.area, 1)} m²" + if (r.longitudManual != null) "  (ajustada)" else "",
+                "${Fmt.num(r.longitud)} m × ${Fmt.num(r.perimetro)} m = ${Fmt.num(r.area, 2)} m²" +
+                    if (r.areaManual != null) "  (oficial)" else if (r.longitudManual != null) "  (long. ajustada)" else "",
                 fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.secondary
             )
             val partes = listOfNotNull(
@@ -122,10 +140,9 @@ private fun TarjetaRegistro(r: Registro, p: Proyecto, nFotos: Int, alTocar: () -
                 if (r.rollos.isNotEmpty()) "Rollos: ${r.rollos.joinToString(", ")}" else null
             )
             if (partes.isNotEmpty()) Text(partes.joinToString("  ·  "), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.padding(top = 6.dp)) {
-                Etiqueta("Fotos $nFotos/4", if (nFotos == 4) 0 else 1)
-                Etiqueta("Presión: ${r.prueba.etiqueta}", when (r.prueba) { Prueba.APROBADO -> 0; Prueba.NA -> 1; Prueba.NO_APROBADO -> 2 })
+            if (r.prueba != Prueba.NA || alertas.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 6.dp)) {
+                if (r.prueba != Prueba.NA) Etiqueta("Presión: ${r.prueba.etiqueta}", if (r.prueba == Prueba.APROBADO) 0 else 2)
                 alertas.filter { !it.startsWith("Prueba") }.forEach { Etiqueta(it, 2) }
             }
             if (r.notas.isNotBlank()) Text(r.notas, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 3)

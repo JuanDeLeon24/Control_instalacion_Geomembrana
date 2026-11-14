@@ -14,6 +14,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,110 +31,127 @@ private fun Linea(k: String, v: String, fuerte: Boolean = false) {
     }
 }
 
+private const val TODO = "Todo el proyecto"
+
 @Composable
 fun ContenidoEstadisticas(p: Proyecto, registros: List<Registro>, pad: PaddingValues) {
-    val cob = Calc.cobertura(registros, p)
-    val rend = Calc.rendimiento(registros)
-    val eta = Calc.eta(registros, p, cob)
-    val areaTot = Calc.areaTotal(p)
-    val porFecha = Calc.porFecha(registros)
-    val turnos = Calc.porTurno(registros)
-    val q = Calc.calidad(registros, p)
-    val traslapos = Calc.todosLosTraslapos(registros)
+    val todas = Calc.porSeccion(registros, p)
+    val grupos = Calc.porGrupo(todas).sortedBy { it.terminada }
+    var elegido by rememberSaveable { mutableStateOf(grupos.firstOrNull()?.nombre ?: TODO) }
+    val grupo = grupos.firstOrNull { it.nombre == elegido }
+    val secs = grupo?.secciones ?: todas
+    val regs = grupo?.registros ?: registros
+    val rend = Calc.rendimiento(regs)
+    val porFecha = Calc.porFecha(regs)
+    val q = Calc.calidad(regs, p)
+    val traslapos = Calc.todosLosTraslapos(regs)
 
     Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
-        Seccion("Avance acumulado") {
-            FranjaTunel(p, registros, alto = 34)
-            Spacer(Modifier.height(8.dp))
-            Linea("Longitud del túnel", "${Fmt.fijo(cob.total)} m")
-            Linea("Cubierto (sin contar traslapos)", "${Fmt.fijo(cob.cubierto)} m · ${Fmt.pct(cob.porcentaje)}", true)
-            Linea("Pendiente", "${Fmt.fijo(cob.restante)} m")
-            Linea("Longitud registrada (suma)", "${Fmt.fijo(rend.longitud)} m")
-            HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            Linea("Área instalada", "${Fmt.fijo(rend.area)} m²", true)
-            areaTot?.let { Linea("Área total estimada (perímetro ${Fmt.num(p.perimetroDefecto)} m)", "${Fmt.fijo(it)} m² · ${Fmt.pct(rend.area / it)}") }
-        }
+        Spacer(Modifier.height(8.dp))
+        Opciones(grupos.map { it.nombre } + TODO, elegido, { it }) { elegido = it }
 
-        Seccion("Rendimiento") {
+        Bloque("Avance acumulado · $elegido") {
+            val pct = grupo?.porcentaje ?: Calc.avanceGlobal(todas)
+            val areaTot = secs.sumOf { it.areaTotal }
             KpiFila(
-                { Kpi("Metros por hora", Fmt.num(rend.mPorHora), "m/h", it) },
-                { Kpi("Área por hora", Fmt.num(rend.m2PorHora, 1), "m²/h", it) }
+                { Kpi("Avance (por área)", Fmt.pct(pct), "", it, destacado = true) },
+                { Kpi("Área instalada", "${Fmt.num(rend.area, 1)} m²", "de ${Fmt.num(areaTot, 0)} m²", it) }
             )
-            Linea("Horas trabajadas", Fmt.duracion(rend.minutos.toDouble()))
-            Linea("Turnos con registros", "${turnos.size}")
-            Linea("Promedio por turno (todos)", if (turnos.isEmpty()) "–" else "${Fmt.num(rend.longitud / turnos.size)} m · ${Fmt.num(rend.area / turnos.size, 1)} m²")
-        }
-
-        Seccion("Proyección de terminación") {
-            if (eta.completado) {
-                Etiqueta("Geomembrana del túnel completada", 0)
-            } else {
-                Kpi("Fecha y hora estimadas", T.fechaHora(eta.fechaHora),
-                    if (eta.fechaHora == null) "Se necesitan registros con avance" else "", Modifier.fillMaxWidth(), destacado = true)
-                Spacer(Modifier.height(8.dp))
-                Linea("Turnos promediados (últimos)", "${eta.turnosUsados} de ${turnos.size}")
-                Linea("Avance promedio por turno", eta.mPorTurno?.let { "${Fmt.num(it)} m" } ?: "–")
-                Linea("Horas promedio por turno", eta.horasPorTurno?.let { Fmt.duracion(it * 60) } ?: "–")
-                Linea("Rendimiento reciente", eta.mPorHora?.let { "${Fmt.num(it)} m/h" } ?: "–")
-                Linea("Faltan", "${Fmt.fijo(eta.restante)} m")
-                Linea("Turnos restantes", Fmt.num(eta.turnosRestantes, 1))
-                Linea("Días restantes (${p.turnosPorDia} turno${if (p.turnosPorDia == 1) "" else "s"}/día)", Fmt.num(eta.diasRestantes, 1))
-                Text("Se proyecta desde el último turno registrado, con el promedio de los últimos ${p.turnosParaEta} turnos " +
-                    "y turnos que inician a las ${p.horaInicioDia}" + (if (p.turnosPorDia >= 2) " y ${p.horaInicioNoche}" else "") + ".",
-                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+            secs.forEach { s ->
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                Text("${s.seccion.nombre} (perímetro ${Fmt.num(s.seccion.perimetro)} m)" + if (s.seccion.terminada) " ✓ terminada" else "",
+                    fontWeight = FontWeight.Bold)
+                FranjaTunel(p, s.registros, alto = 22)
+                Linea("Cubierto (sin traslapos)", "${Fmt.fijo(s.cobertura.cubierto)} m · ${Fmt.pct(s.cobertura.porcentaje)}", true)
+                Linea("Pendiente", if (s.seccion.terminada) "–" else "${Fmt.fijo(s.cobertura.restante)} m")
+                Linea("Longitud registrada", "${Fmt.fijo(s.rend.longitud)} m")
+                Linea("Área instalada", "${Fmt.fijo(s.rend.area)} m²")
             }
         }
 
-        if (porFecha.isNotEmpty()) Seccion("Avance por fecha") {
-            val max = porFecha.maxOf { it.rend.longitud }.takeIf { it > 0 } ?: 1.0
+        Bloque("Rendimiento · $elegido") {
+            val turnos = Calc.porTurno(regs)
+            Linea("Días con instalación", "${porFecha.size}")
+            Linea("Promedio por día", if (porFecha.isEmpty()) "–" else "${Fmt.num(rend.longitud / porFecha.size)} m · ${Fmt.num(rend.area / porFecha.size, 1)} m²")
+            Linea("Turnos registrados", "${turnos.size}")
+            if (rend.minutos > 0) {
+                Linea("Horas trabajadas (registros con horario)", Fmt.duracion(rend.minutos.toDouble()))
+                Linea("Rendimiento por hora", "${Fmt.num(rend.mPorHora)} m/h · ${Fmt.num(rend.m2PorHora, 1)} m²/h", true)
+            } else {
+                Text("Para m/h y m²/h registra la hora de inicio y fin en cada registro.", fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        secs.filter { !it.seccion.terminada }.forEach { s ->
+            Bloque("Curva S y proyección · ${s.seccion.nombre}") {
+                GraficoCurvaS(Calc.curvaS(registros, s.seccion, p))
+                Spacer(Modifier.height(8.dp))
+                val e = s.eta
+                if (e.completado) Etiqueta("Sección completada", 0) else {
+                    Kpi("Terminación estimada", T.fechaHora(e.fechaHora), if (e.fechaHora == null) "Se necesitan registros con avance" else "",
+                        Modifier.fillMaxWidth(), destacado = true)
+                    Linea("Turnos promediados (últimos)", "${e.turnosUsados}")
+                    Linea("Avance promedio por turno", e.mPorTurno?.let { "${Fmt.num(it)} m · ${Fmt.num(it * s.seccion.perimetro, 1)} m²" } ?: "–")
+                    Linea("Faltan", "${Fmt.fijo(e.restante)} m · ${Fmt.num(e.restante * s.seccion.perimetro, 1)} m²")
+                    Linea("Turnos restantes", Fmt.num(e.turnosRestantes, 1))
+                    Linea("Días restantes (${p.turnosPorDia} turno${if (p.turnosPorDia == 1) "" else "s"}/día)", Fmt.num(e.diasRestantes, 1))
+                    Text("Proyectado desde el último registro con el promedio de los últimos ${p.turnosParaEta} turnos " +
+                        "(línea amarilla) y con el promedio de todos los turnos (línea gris).",
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+        }
+
+        if (porFecha.isNotEmpty()) Bloque("Avance por fecha · $elegido") {
+            val max = porFecha.maxOf { it.rend.area }.takeIf { it > 0 } ?: 1.0
             porFecha.reversed().forEach { d ->
                 val r = d.rend
                 Column(Modifier.padding(vertical = 4.dp)) {
                     Row {
                         Text(T.fechaCorta(d.fecha), fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        Text("${Fmt.num(r.longitud)} m · ${Fmt.num(r.area, 1)} m² · ${Fmt.num(r.mPorHora)} m/h", fontSize = 14.sp)
+                        Text("${Fmt.num(r.longitud)} m · ${Fmt.num(r.area, 2)} m²", fontSize = 14.sp)
                     }
-                    Barra((r.longitud / max).toFloat())
+                    Barra((r.area / max).toFloat())
                 }
             }
         }
 
-        val cuadrillas = Calc.porCuadrilla(registros)
-        if (cuadrillas.isNotEmpty()) Seccion("Rendimiento por cuadrilla") {
-            val max = cuadrillas.maxOf { it.longitud }.takeIf { it > 0 } ?: 1.0
+        val cuadrillas = Calc.porCuadrilla(regs).filter { it.nombre != "Sin asignar" || regs.isNotEmpty() }
+        if (cuadrillas.isNotEmpty()) Bloque("Por cuadrilla / responsable") {
+            val max = cuadrillas.maxOf { it.area }.takeIf { it > 0 } ?: 1.0
             cuadrillas.forEach { c ->
                 Column(Modifier.padding(vertical = 4.dp)) {
                     Text(c.nombre, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text("${c.turnos} turno(s) · ${Fmt.num(c.longitud)} m · ${Fmt.num(c.area, 1)} m² · " +
-                        "${Fmt.num(c.mPorHora)} m/h · ${Fmt.num(c.m2PorHora, 1)} m²/h", fontSize = 14.sp)
-                    Barra((c.longitud / max).toFloat(), MaterialTheme.colorScheme.primary)
+                    Text("${c.turnos} turno(s) · ${Fmt.num(c.longitud)} m · ${Fmt.num(c.area, 1)} m²" +
+                        (if (c.mPorHora != null) " · ${Fmt.num(c.mPorHora)} m/h · ${Fmt.num(c.m2PorHora, 1)} m²/h" else ""), fontSize = 14.sp)
+                    Barra((c.area / max).toFloat(), MaterialTheme.colorScheme.primary)
                 }
             }
         }
 
-        val rollos = Calc.porRollo(registros)
-        if (rollos.isNotEmpty()) Seccion("Rollos (${rollos.size})") {
-            rollos.forEach { r ->
-                Linea(r.codigo, "${r.registros} reg. · ${Fmt.num(r.longitud)} m · ${Fmt.num(r.area, 1)} m²")
-            }
+        val rollos = Calc.porRollo(regs)
+        if (rollos.isNotEmpty()) Bloque("Rollos (${rollos.size})") {
+            rollos.forEach { r -> Linea(r.codigo, "${r.registros} reg. · ${Fmt.num(r.longitud)} m · ${Fmt.num(r.area, 1)} m²") }
             Text("Si un registro usa varios rollos, su longitud y área se reparten por igual entre ellos.",
                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
-        Seccion("Tramos pendientes (${cob.pendientes.size})") {
-            if (cob.pendientes.isEmpty()) Etiqueta("Sin tramos pendientes", 0)
-            cob.pendientes.forEach { t -> Linea("${Abscisa.texto(t.ini)} – ${Abscisa.texto(t.fin)}", "${Fmt.fijo(t.longitud)} m") }
+        Bloque("Tramos pendientes y traslapos") {
+            val pend = secs.filter { !it.seccion.terminada }.flatMap { s -> s.cobertura.pendientes.map { s.seccion.nombre to it } }
+            if (pend.isEmpty()) Etiqueta("Sin tramos pendientes", 0)
+            pend.forEach { (n, t) -> Linea("$n: ${Abscisa.texto(t.ini)} – ${Abscisa.texto(t.fin)}", "${Fmt.fijo(t.longitud)} m") }
             if (traslapos.isNotEmpty()) {
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                Text("Traslapos entre registros", fontWeight = FontWeight.Bold)
+                Text("Traslapos entre registros de la misma sección", fontWeight = FontWeight.Bold)
                 traslapos.forEach { t ->
-                    Linea("${T.fechaCorta(t.a.fecha)} ${t.a.turno} / ${T.fechaCorta(t.b.fecha)} ${t.b.turno}",
+                    Linea("${t.a.seccion}: ${T.fechaCorta(t.a.fecha)} / ${T.fechaCorta(t.b.fecha)}",
                         "${Abscisa.texto(t.tramo.ini)} – ${Abscisa.texto(t.tramo.fin)} (${Fmt.num(t.tramo.longitud)} m)")
                 }
             }
         }
 
-        Seccion("Control de calidad") {
+        Bloque("Control de calidad") {
             Linea("Temperatura cuña / extrusora", if (q.conTemp == 0) "sin datos" else
                 "${Fmt.num(q.tempProm, 1)} °C prom. (${Fmt.num(q.tempMin, 1)} a ${Fmt.num(q.tempMax, 1)})")
             q.tempFuera?.let { Linea("   fuera de especificación", "$it") }
@@ -141,7 +162,7 @@ fun ContenidoEstadisticas(p: Proyecto, registros: List<Registro>, pad: PaddingVa
             Linea("Geotextil", "${q.geoOk} OK · ${q.geoObs} con obs. · ${q.geoNo} sin inspección")
             q.alertas.forEach { (r, a) ->
                 Spacer(Modifier.height(4.dp))
-                Etiqueta("${T.fechaCorta(r.fecha)} ${r.turno} ${Abscisa.texto(r.absIni)}: ${a.joinToString(" · ")}",
+                Etiqueta("${T.fechaCorta(r.fecha)} ${r.seccion} ${Abscisa.texto(r.absIni)}: ${a.joinToString(" · ")}",
                     if (a.any { it.contains("no aprobada") || it.contains("fuera") }) 2 else 1)
             }
         }

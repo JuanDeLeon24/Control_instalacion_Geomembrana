@@ -6,40 +6,55 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-/** Información de una foto guardada. El archivo vive en filesDir/fotos/. */
-data class Foto(val registroId: String, val momento: Momento, val archivo: String, val tomada: String)
+/** Foto de una jornada (reporte diario). [jornada] es la fecha yyyy-MM-dd. El archivo vive en filesDir/fotos/. */
+data class Foto(val jornada: String, val momento: Momento, val archivo: String, val tomada: String)
 
 /** Base de datos SQLite dentro del teléfono. Cada cambio se guarda al instante. */
-class Db(ctx: Context) : SQLiteOpenHelper(ctx, "geomembrana.db", null, 1) {
+class Db(ctx: Context) : SQLiteOpenHelper(ctx, "geomembrana.db", null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             "CREATE TABLE registros(" +
-                "id TEXT PRIMARY KEY, fecha TEXT NOT NULL, turno TEXT NOT NULL, responsable TEXT, cuadrilla TEXT, " +
+                "id TEXT PRIMARY KEY, fecha TEXT NOT NULL, turno TEXT NOT NULL, seccion TEXT, responsable TEXT, cuadrilla TEXT, " +
                 "abs_ini REAL NOT NULL, abs_fin REAL NOT NULL, hora_ini TEXT, hora_fin TEXT, " +
-                "longitud_manual REAL, perimetro REAL, rollos TEXT, temp_cuna REAL, vel_soldadura REAL, " +
+                "longitud_manual REAL, perimetro REAL, area_manual REAL, rollos TEXT, temp_cuna REAL, vel_soldadura REAL, " +
                 "prueba TEXT, geotextil TEXT, notas TEXT, creado TEXT)"
         )
-        db.execSQL(
-            "CREATE TABLE fotos(registro_id TEXT NOT NULL, momento TEXT NOT NULL, archivo TEXT NOT NULL, " +
-                "tomada TEXT, PRIMARY KEY(registro_id, momento))"
-        )
         db.execSQL("CREATE INDEX idx_registros_fecha ON registros(fecha)")
+        crearFotos(db)
+    }
+
+    private fun crearFotos(db: SQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS fotos_jornada(fecha TEXT NOT NULL, momento TEXT NOT NULL, archivo TEXT NOT NULL, " +
+                "tomada TEXT, PRIMARY KEY(fecha, momento))"
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Versión 1: aún no hay migraciones. Las futuras solo deben AGREGAR tablas o columnas.
+        if (oldVersion < 2) {
+            // v1 -> v2: secciones, cantidad oficial y fotos por jornada (antes por registro)
+            db.execSQL("ALTER TABLE registros ADD COLUMN seccion TEXT")
+            db.execSQL("ALTER TABLE registros ADD COLUMN area_manual REAL")
+            db.execSQL("UPDATE registros SET seccion = 'Bóveda' WHERE seccion IS NULL")
+            crearFotos(db)
+            db.execSQL(
+                "INSERT OR IGNORE INTO fotos_jornada(fecha, momento, archivo, tomada) " +
+                    "SELECT r.fecha, f.momento, f.archivo, f.tomada FROM fotos f JOIN registros r ON r.id = f.registro_id"
+            )
+            db.execSQL("DROP TABLE IF EXISTS fotos")
+        }
     }
 
     private fun Cursor.txt(c: String): String = getColumnIndex(c).let { if (it < 0 || isNull(it)) "" else getString(it) }
     private fun Cursor.dbl(c: String): Double? = getColumnIndex(c).let { if (it < 0 || isNull(it)) null else getDouble(it) }
 
     private fun leer(c: Cursor) = Registro(
-        id = c.txt("id"), fecha = c.txt("fecha"), turno = c.txt("turno"),
+        id = c.txt("id"), fecha = c.txt("fecha"), turno = c.txt("turno"), seccion = c.txt("seccion"),
         responsable = c.txt("responsable"), cuadrilla = c.txt("cuadrilla"),
         absIni = c.dbl("abs_ini") ?: 0.0, absFin = c.dbl("abs_fin") ?: 0.0,
         horaIni = c.txt("hora_ini"), horaFin = c.txt("hora_fin"),
-        longitudManual = c.dbl("longitud_manual"), perimetro = c.dbl("perimetro"),
+        longitudManual = c.dbl("longitud_manual"), perimetro = c.dbl("perimetro"), areaManual = c.dbl("area_manual"),
         rollos = c.txt("rollos").split("\n").map { it.trim() }.filter { it.isNotEmpty() },
         tempCuna = c.dbl("temp_cuna"), velSoldadura = c.dbl("vel_soldadura"),
         prueba = Prueba.de(c.txt("prueba")), geotextil = Geotextil.de(c.txt("geotextil")),
@@ -53,16 +68,16 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "geomembrana.db", null, 1) {
             Calc.ordenar(l)
         }
 
+    private fun ContentValues.num(k: String, v: Double?) { if (v != null) put(k, v) else putNull(k) }
+
     private fun valores(r: Registro) = ContentValues().apply {
-        put("id", r.id); put("fecha", r.fecha); put("turno", r.turno)
+        put("id", r.id); put("fecha", r.fecha); put("turno", r.turno); put("seccion", r.seccion)
         put("responsable", r.responsable); put("cuadrilla", r.cuadrilla)
         put("abs_ini", r.absIni); put("abs_fin", r.absFin)
         put("hora_ini", r.horaIni); put("hora_fin", r.horaFin)
-        if (r.longitudManual != null) put("longitud_manual", r.longitudManual) else putNull("longitud_manual")
-        if (r.perimetro != null) put("perimetro", r.perimetro) else putNull("perimetro")
+        num("longitud_manual", r.longitudManual); num("perimetro", r.perimetro); num("area_manual", r.areaManual)
         put("rollos", r.rollos.joinToString("\n"))
-        if (r.tempCuna != null) put("temp_cuna", r.tempCuna) else putNull("temp_cuna")
-        if (r.velSoldadura != null) put("vel_soldadura", r.velSoldadura) else putNull("vel_soldadura")
+        num("temp_cuna", r.tempCuna); num("vel_soldadura", r.velSoldadura)
         put("prueba", r.prueba.name); put("geotextil", r.geotextil.name)
         put("notas", r.notas); put("creado", r.creado)
     }
@@ -71,36 +86,46 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "geomembrana.db", null, 1) {
         writableDatabase.insertWithOnConflict("registros", null, valores(r), SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-    fun eliminar(id: String) {
-        writableDatabase.delete("registros", "id = ?", arrayOf(id))
-        writableDatabase.delete("fotos", "registro_id = ?", arrayOf(id))
+    /** Agrega varios registros en una sola transacción (importación). */
+    fun agregar(lista: List<Registro>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            lista.forEach { db.insertWithOnConflict("registros", null, valores(it), SQLiteDatabase.CONFLICT_REPLACE) }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
-    // ---------- Fotos ----------
+    fun eliminar(id: String) {
+        writableDatabase.delete("registros", "id = ?", arrayOf(id))
+    }
+
+    // ---------- Fotos de la jornada ----------
+
+    private fun valoresFoto(f: Foto) = ContentValues().apply {
+        put("fecha", f.jornada); put("momento", f.momento.name); put("archivo", f.archivo); put("tomada", f.tomada)
+    }
 
     fun fotos(): List<Foto> =
-        readableDatabase.rawQuery("SELECT * FROM fotos", null).use { c ->
+        readableDatabase.rawQuery("SELECT * FROM fotos_jornada", null).use { c ->
             val l = mutableListOf<Foto>()
             while (c.moveToNext()) {
                 val m = runCatching { Momento.valueOf(c.txt("momento")) }.getOrNull() ?: continue
-                l += Foto(c.txt("registro_id"), m, c.txt("archivo"), c.txt("tomada"))
+                l += Foto(c.txt("fecha"), m, c.txt("archivo"), c.txt("tomada"))
             }
             l
         }
 
-    fun fotosDe(registroId: String): Map<Momento, Foto> =
-        fotos().filter { it.registroId == registroId }.associateBy { it.momento }
+    fun fotosDe(jornada: String): Map<Momento, Foto> = fotos().filter { it.jornada == jornada }.associateBy { it.momento }
 
     fun guardarFoto(f: Foto) {
-        val v = ContentValues().apply {
-            put("registro_id", f.registroId); put("momento", f.momento.name)
-            put("archivo", f.archivo); put("tomada", f.tomada)
-        }
-        writableDatabase.insertWithOnConflict("fotos", null, v, SQLiteDatabase.CONFLICT_REPLACE)
+        writableDatabase.insertWithOnConflict("fotos_jornada", null, valoresFoto(f), SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-    fun quitarFoto(registroId: String, m: Momento) {
-        writableDatabase.delete("fotos", "registro_id = ? AND momento = ?", arrayOf(registroId, m.name))
+    fun quitarFoto(jornada: String, m: Momento) {
+        writableDatabase.delete("fotos_jornada", "fecha = ? AND momento = ?", arrayOf(jornada, m.name))
     }
 
     /** Reemplaza todo el contenido (restaurar copia de seguridad). */
@@ -109,14 +134,9 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "geomembrana.db", null, 1) {
         db.beginTransaction()
         try {
             db.delete("registros", null, null)
-            db.delete("fotos", null, null)
+            db.delete("fotos_jornada", null, null)
             registros.forEach { db.insert("registros", null, valores(it)) }
-            fotos.forEach { f ->
-                db.insert("fotos", null, ContentValues().apply {
-                    put("registro_id", f.registroId); put("momento", f.momento.name)
-                    put("archivo", f.archivo); put("tomada", f.tomada)
-                })
-            }
+            fotos.forEach { db.insert("fotos_jornada", null, valoresFoto(it)) }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()

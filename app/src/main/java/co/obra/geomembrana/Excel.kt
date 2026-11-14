@@ -58,95 +58,104 @@ object Excel {
 
     fun avance(ctx: Context, registros: List<Registro>, fotos: List<Foto>, p: Proyecto): File {
         val regs = Calc.ordenar(registros)
-        val cob = Calc.cobertura(regs, p)
+        val secs = Calc.porSeccion(regs, p)
+        val grupos = Calc.porGrupo(secs)
         val rend = Calc.rendimiento(regs)
-        val eta = Calc.eta(regs, p, cob)
-        val q = Calc.calidad(regs, p)
-        val areaTot = Calc.areaTotal(p)
 
-        // ---------- Resumen ----------
-        val res = Hoja("Resumen", listOf(36.0, 40.0))
-        res.fila(listOf(c(p.titulo, TITULO), c(null, TITULO)), 30.0); res.combinadas += "A1:B1"
-        res.fila(listOf(c(listOf(p.empresa, p.nombre).filter { it.isNotBlank() }.joinToString("  ·  "), SUB))); res.combinadas += "A2:B2"
+        // ---------- Resumen: global, por grupo y por sección ----------
+        val res = Hoja("Resumen", listOf(24.0, 14.0, 12.0, 14.0, 12.0, 14.0, 14.0, 12.0, 12.0, 20.0))
+        res.fila(listOf(c(p.titulo, TITULO)) + List(9) { c(null, TITULO) }, 30.0); res.combinadas += "A1:J1"
+        res.fila(listOf(c(listOf(p.empresa, p.nombre, "${Abscisa.texto(p.absIni)} a ${Abscisa.texto(p.absFin)} (${Fmt.num(p.longitudTotal)} m)",
+            "Generado ${T.marcaCorta(T.marca())}").filter { it.isNotBlank() }.joinToString("  ·  "), SUB))); res.combinadas += "A2:J2"
         res.fila(emptyList())
-        fun kv(k: String, v: Any?, est: Int = TEXTO) { res.fila(listOf(c(k, ETIQ), c(v, est))) }
-        kv("Abscisa inicial del túnel", Abscisa.texto(p.absIni))
-        kv("Abscisa final del túnel", Abscisa.texto(p.absFin))
-        kv("Longitud total (m)", p.longitudTotal, DEC2)
-        kv("Perímetro de referencia (m)", p.perimetroDefecto, DEC2)
-        kv("Área total a cubrir (m²)", areaTot, DEC2)
-        kv("Longitud cubierta (m, sin traslapos)", cob.cubierto, DEC2)
-        kv("Avance", cob.porcentaje, PCT)
-        kv("Longitud pendiente (m)", cob.restante, DEC2)
-        kv("Longitud registrada (m, suma de registros)", rend.longitud, DEC2)
-        kv("Área instalada (m²)", rend.area, DEC2)
-        kv("Horas trabajadas", rend.minutos / 60.0, DEC2)
-        kv("Rendimiento (m/h)", rend.mPorHora, DEC2)
-        kv("Rendimiento (m²/h)", rend.m2PorHora, DEC2)
-        kv("Promedio por turno (últimos ${eta.turnosUsados}) (m)", eta.mPorTurno, DEC2)
-        kv("Turnos restantes estimados", eta.turnosRestantes, DEC2)
-        kv("Terminación estimada", if (eta.completado) "Completado" else T.fechaHora(eta.fechaHora))
-        kv("Pruebas de presión aprobadas / no aprobadas / N.A.", "${q.aprobadas} / ${q.noAprobadas} / ${q.pruebasNA}")
-        kv("Generado", T.marcaCorta(T.marca()))
+        res.fila(listOf("Grupo / sección", "Perímetro (m)", "Estado", "Cubierto (m)", "Avance", "Pendiente (m)", "Área instalada (m²)",
+            "Área total (m²)", "m/h", "Terminación estimada").map { c(it, ENC) }, 32.0)
+        fun eta(f: java.time.LocalDateTime?, terminada: Boolean) = if (terminada) "Terminada" else f?.let { T.fechaHora(it) } ?: "–"
+        grupos.forEach { g ->
+            res.fila(listOf(c(g.nombre, TOT_ETIQ), c(null, TOT_NUM), c(if (g.terminada) "Terminada" else "En curso", TOT_ETIQ), c(null, TOT_NUM),
+                c(g.porcentaje, PCT), d(g.pendiente, TOT_NUM), d(g.rend.area, TOT_NUM), d(g.areaTotal, TOT_NUM), d(g.rend.mPorHora, TOT_NUM),
+                c(eta(g.etaFecha, g.terminada), TOT_ETIQ)))
+            g.secciones.forEach { s ->
+                res.fila(listOf(c("   " + s.seccion.nombre, TEXTO), d(s.seccion.perimetro), c(if (s.terminada) "Terminada" else "En curso", CENTRO),
+                    d(s.cobertura.cubierto), c(s.porcentaje, PCT), d(if (s.seccion.terminada) 0.0 else s.cobertura.restante),
+                    d(s.rend.area), d(s.areaTotal), d(s.rend.mPorHora), c(eta(s.eta.fechaHora, s.terminada), CENTRO)))
+            }
+        }
+        res.fila(listOf(c("TOTAL PROYECTO", TOT_ETIQ), c(null, TOT_NUM), c(null, TOT_ETIQ), c(null, TOT_NUM), c(Calc.avanceGlobal(secs), PCT),
+            c(null, TOT_NUM), d(rend.area, TOT_NUM), d(Calc.areaTotal(p), TOT_NUM), d(rend.mPorHora, TOT_NUM), c(null, TOT_ETIQ)))
+        res.fila(emptyList())
+        res.fila(listOf(c("Avance por área: perímetro × metros cubiertos (sin traslapos) frente a perímetro × longitud del túnel. " +
+            "Las secciones terminadas cuentan al 100 %.", SUB)))
 
         // ---------- Registros ----------
-        val porId = fotos.groupBy { it.registroId }
-        val reg = Hoja("Registros", listOf(11.0, 8.0, 18.0, 16.0, 12.0, 12.0, 11.0, 11.0, 11.0, 11.0, 12.0, 9.0, 9.0, 9.0, 9.0, 10.0,
-            22.0, 11.0, 11.0, 13.0, 26.0, 8.0, 36.0))
+        val porDia = fotos.groupBy { it.jornada }
+        val reg = Hoja("Registros", listOf(11.0, 8.0, 12.0, 18.0, 16.0, 12.0, 12.0, 11.0, 11.0, 11.0, 11.0, 12.0, 9.0, 9.0, 9.0, 9.0, 10.0,
+            22.0, 11.0, 11.0, 13.0, 26.0, 36.0))
         reg.congelar = 1
-        reg.fila(listOf("Fecha", "Turno", "Responsable", "Cuadrilla", "Abscisa inicial", "Abscisa final", "Abs. inicial (m)",
-            "Abs. final (m)", "Longitud (m)", "Perímetro (m)", "Área (m²)", "Hora inicio", "Hora fin", "Horas", "m/h", "m²/h",
-            "Rollos", "Temp. cuña (°C)", "Vel. soldadura (m/min)", "Prueba de presión", "Geotextil", "Fotos", "Notas").map { c(it, ENC) }, 32.0)
+        reg.fila(listOf("Fecha", "Turno", "Sección", "Responsable", "Cuadrilla", "PK inicial", "PK final", "Abs. inicial (m)",
+            "Abs. final (m)", "Longitud (m)", "Perímetro (m)", "Cantidad (m²)", "Hora inicio", "Hora fin", "Horas", "m/h", "m²/h",
+            "Rollos", "Temp. cuña (°C)", "Vel. soldadura (m/min)", "Prueba de presión", "Geotextil", "Notas").map { c(it, ENC) }, 32.0)
         regs.forEach { r ->
             val f = reg.siguiente
             val h = r.minutos?.takeIf { it > 0 }?.let { it / 60.0 }
-            reg.fila(listOf(c(T.serialExcel(r.fecha), FECHA), c(r.turno, CENTRO), c(r.responsable, TEXTO), c(r.cuadrilla, TEXTO),
+            val area = r.area
+            reg.fila(listOf(c(T.serialExcel(r.fecha), FECHA), c(r.turno, CENTRO), c(r.seccion, TEXTO), c(r.responsable, TEXTO), c(r.cuadrilla, TEXTO),
                 c(Abscisa.texto(r.absIni), CENTRO), c(Abscisa.texto(r.absFin), CENTRO), d(r.absIni), d(r.absFin),
-                d(r.longitud),
-                d(r.perimetro),
-                if (r.area != null) c(Formula("I$f*J$f", Math.round(r.area!! * 100) / 100.0), DEC2) else c(null, DEC2),
+                d(r.longitud), d(r.perimetro),
+                when {
+                    area == null -> c(null, DEC2)
+                    r.areaManual != null -> d(area)                       // cantidad oficial
+                    else -> c(Formula("J$f*K$f", Math.round(area * 100) / 100.0), DEC2)
+                },
                 hora(r.horaIni), hora(r.horaFin), d(h),
-                d(h?.let { r.longitud / it }), d(if (h != null && r.area != null) r.area!! / h else null),
+                d(h?.let { r.longitud / it }), d(if (h != null && area != null) area / h else null),
                 c(r.rollos.joinToString(", "), TEXTO), d(r.tempCuna, NUM), d(r.velSoldadura),
-                c(r.prueba.etiqueta, CENTRO), c(r.geotextil.etiqueta, TEXTO),
-                c("${porId[r.id]?.size ?: 0}/4", CENTRO), c(r.notas, TEXTO)))
+                c(r.prueba.etiqueta, CENTRO), c(r.geotextil.etiqueta, TEXTO), c(r.notas, TEXTO)))
         }
         val ult = reg.filas.size
         if (regs.isNotEmpty()) {
-            reg.fila(List(8) { c(if (it == 0) "TOTAL" else null, TOT_ETIQ) } +
-                listOf(c(Formula("SUM(I2:I$ult)", rend.longitud), TOT_NUM), c(null, TOT_NUM),
-                    c(Formula("SUM(K2:K$ult)", rend.area), TOT_NUM), c(null, TOT_NUM), c(null, TOT_NUM),
-                    c(Formula("SUM(N2:N$ult)", rend.minutos / 60.0), TOT_NUM)))
-            reg.combinadas += "A${reg.filas.size}:H${reg.filas.size}"
+            reg.fila(List(9) { c(if (it == 0) "TOTAL" else null, TOT_ETIQ) } +
+                listOf(c(Formula("SUM(J2:J$ult)", rend.longitud), TOT_NUM), c(null, TOT_NUM),
+                    c(Formula("SUM(L2:L$ult)", rend.area), TOT_NUM), c(null, TOT_NUM), c(null, TOT_NUM),
+                    c(Formula("SUM(O2:O$ult)", rend.minutos / 60.0), TOT_NUM)))
+            reg.combinadas += "A${reg.filas.size}:I${reg.filas.size}"
         }
         reg.filtro = "A1:W${maxOf(2, ult)}"
 
-        // ---------- Por fecha ----------
-        val pf = Hoja("Por fecha", listOf(12.0, 9.0, 10.0, 13.0, 13.0, 10.0, 10.0, 10.0, 15.0, 12.0))
+        // ---------- Por fecha, separado por grupo ----------
+        val nombres = grupos.map { it.nombre }
+        val pf = Hoja("Por fecha", listOf(12.0) + nombres.flatMap { listOf(12.0, 13.0) } + listOf(13.0, 8.0))
         pf.congelar = 1
-        pf.fila(listOf("Fecha", "Turnos", "Registros", "Longitud (m)", "Área (m²)", "Horas", "m/h", "m²/h",
-            "Acumulado registrado (m)", "Avance acum.").map { c(it, ENC) }, 32.0)
-        var acum = 0.0
+        pf.fila(listOf(c("Fecha", ENC)) + nombres.flatMap { listOf(c("$it (m)", ENC), c("$it (m²)", ENC)) } +
+            listOf(c("Total (m²)", ENC), c("Fotos", ENC)), 32.0)
         Calc.porFecha(regs).forEach { x ->
-            val r = x.rend
-            acum += r.longitud
-            pf.fila(listOf(c(T.serialExcel(x.fecha), FECHA), c(x.turnos.toDouble(), NUM), c(r.registros.toDouble(), NUM),
-                d(r.longitud), d(r.area), d(r.minutos / 60.0), d(r.mPorHora), d(r.m2PorHora), d(acum),
-                c(Calc.cobertura(regs.filter { it.fecha <= x.fecha }, p).porcentaje, PCT)))
+            val m = Calc.metricas(x.registros, p).associateBy { it.nombre }
+            pf.fila(listOf(c(T.serialExcel(x.fecha), FECHA)) +
+                nombres.flatMap { n -> listOf(d(m[n]?.total?.longitud), d(m[n]?.total?.area)) } +
+                listOf(d(x.rend.area, DEC2), c("${porDia[x.fecha]?.size ?: 0}/4", CENTRO)))
         }
 
-        // ---------- Rollos ----------
-        val ro = Hoja("Rollos", listOf(16.0, 11.0, 15.0, 15.0, 12.0, 12.0))
-        ro.congelar = 1
-        ro.fila(listOf("Rollo", "Registros", "Longitud (m)*", "Área (m²)*", "Primer uso", "Último uso").map { c(it, ENC) }, 32.0)
-        Calc.porRollo(regs).forEach { x ->
-            ro.fila(listOf(c(x.codigo, TEXTO), c(x.registros.toDouble(), NUM), d(x.longitud), d(x.area),
-                c(T.serialExcel(x.primera), FECHA), c(T.serialExcel(x.ultima), FECHA)))
+        // ---------- Curva S (secciones en curso) ----------
+        val hojas = mutableListOf(res, reg, pf)
+        secs.filter { !it.seccion.terminada }.forEach { s ->
+            val cs = Calc.curvaS(regs, s.seccion, p)
+            if (cs.real.isEmpty()) return@forEach
+            val h = Hoja("Curva S ${s.seccion.nombre}".take(31), listOf(12.0, 14.0, 10.0, 16.0, 16.0, 10.0))
+            h.congelar = 1
+            h.fila(listOf("Fecha", "Real acumulado (m)", "Real (%)", "Proyectado reciente (m)", "Proyectado promedio (m)", "Proy. (%)").map { c(it, ENC) }, 32.0)
+            val pr = cs.proyReciente.associateBy { it.fecha }; val pp = cs.proyPromedio.associateBy { it.fecha }
+            val re = cs.real.associateBy { it.fecha }
+            (cs.real.map { it.fecha } + cs.proyReciente.map { it.fecha } + cs.proyPromedio.map { it.fecha }).distinct().sorted().forEach { f ->
+                val vr = re[f]?.metros; val a = pr[f]?.metros; val b = pp[f]?.metros
+                h.fila(listOf(c(T.serialExcel(f.toString()), FECHA), d(vr), c(vr?.let { it / cs.total }, PCT), d(a), d(b), c(a?.let { it / cs.total }, PCT)))
+            }
+            h.fila(emptyList())
+            h.fila(listOf(c("Proyección: ${Fmt.num(cs.mPorDiaReciente)} m/día (últimos ${p.turnosParaEta} turnos) y " +
+                "${Fmt.num(cs.mPorDiaPromedio)} m/día (todos los turnos), desde el último día registrado.", SUB)))
+            hojas += h
         }
-        ro.fila(emptyList())
-        ro.fila(listOf(c("* Cuando un registro usa varios rollos, su longitud y área se reparten por igual entre ellos.", SUB)))
 
-        // ---------- Cuadrillas ----------
+        // ---------- Cuadrillas y rollos ----------
         val cu = Hoja("Cuadrillas", listOf(24.0, 9.0, 10.0, 13.0, 13.0, 10.0, 10.0, 10.0))
         cu.congelar = 1
         cu.fila(listOf("Cuadrilla / responsable", "Turnos", "Registros", "Longitud (m)", "Área (m²)", "Horas", "m/h", "m²/h").map { c(it, ENC) }, 32.0)
@@ -154,13 +163,22 @@ object Excel {
             cu.fila(listOf(c(x.nombre, TEXTO), c(x.turnos.toDouble(), NUM), c(x.registros.toDouble(), NUM), d(x.longitud),
                 d(x.area), d(x.minutos / 60.0), d(x.mPorHora), d(x.m2PorHora)))
         }
+        hojas += cu
+        val rollos = Calc.porRollo(regs)
+        if (rollos.isNotEmpty()) {
+            val ro = Hoja("Rollos", listOf(16.0, 11.0, 15.0, 15.0, 12.0, 12.0))
+            ro.congelar = 1
+            ro.fila(listOf("Rollo", "Registros", "Longitud (m)*", "Área (m²)*", "Primer uso", "Último uso").map { c(it, ENC) }, 32.0)
+            rollos.forEach { x ->
+                ro.fila(listOf(c(x.codigo, TEXTO), c(x.registros.toDouble(), NUM), d(x.longitud), d(x.area),
+                    c(T.serialExcel(x.primera), FECHA), c(T.serialExcel(x.ultima), FECHA)))
+            }
+            ro.fila(emptyList())
+            ro.fila(listOf(c("* Cuando un registro usa varios rollos, su longitud y área se reparten por igual entre ellos.", SUB)))
+            hojas += ro
+        }
 
-        // ---------- Pendientes ----------
-        val pe = Hoja("Tramos pendientes", listOf(16.0, 16.0, 14.0))
-        pe.fila(listOf("Desde", "Hasta", "Longitud (m)").map { c(it, ENC) }, 24.0)
-        cob.pendientes.forEach { t -> pe.fila(listOf(c(Abscisa.texto(t.ini), CENTRO), c(Abscisa.texto(t.fin), CENTRO), d(t.longitud))) }
-
-        return escribir(ctx, nombreArchivo("Geomembrana_${p.nombre}_${T.hoy()}"), listOf(res, reg, pf, ro, cu, pe))
+        return escribir(ctx, nombreArchivo("Geomembrana_${p.nombre}_${T.hoy()}"), hojas)
     }
 
     // ================= Escritura del archivo =================

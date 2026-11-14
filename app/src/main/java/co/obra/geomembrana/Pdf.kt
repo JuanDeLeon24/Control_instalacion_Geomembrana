@@ -154,32 +154,42 @@ object Pdf {
         h.y += 16f
     }
 
-    /** Franja del túnel: tramos instalados (amarillo), los de la jornada (azul) y lo pendiente (gris). */
-    private fun franja(h: Hojas, p: Proyecto, acumulado: List<Registro>, delDia: List<Registro>) {
-        h.espacio(48f)
+    /** Franjas del túnel por sección: instalado (amarillo), lo de la jornada (azul) y lo pendiente (gris). */
+    private fun franjas(h: Hojas, p: Proyecto, secs: List<AvanceSeccion>, delDia: List<Registro>) {
+        val etiq = 70f
+        h.espacio(30f + secs.size * 16f)
         h.y += 8f
         val c = h.c
-        val x0 = M; val w = ancho; val y0 = h.y + 4f; val alto = 18f
+        val x0 = M + etiq; val w = ancho - etiq; val alto = 11f
         fun xDe(a: Double) = x0 + ((a - p.absIni) / p.longitudTotal * w).toFloat().coerceIn(0f, w)
-        relleno.color = PEND; c.drawRect(x0, y0, x0 + w, y0 + alto, relleno)
-        relleno.color = GEO
-        Calc.cobertura(acumulado, p).tramos.forEach { t -> c.drawRect(xDe(t.ini), y0, xDe(t.fin).coerceAtLeast(xDe(t.ini) + 0.8f), y0 + alto, relleno) }
-        relleno.color = GEO_DIA
-        Calc.cobertura(delDia, p).tramos.forEach { t -> c.drawRect(xDe(t.ini), y0, xDe(t.fin).coerceAtLeast(xDe(t.ini) + 0.8f), y0 + alto, relleno) }
-        c.drawRect(x0, y0, x0 + w, y0 + alto, borde)
+        val fe = tp(7f, true, AZUL)
+        secs.forEach { s ->
+            val y0 = h.y
+            c.drawText(s.seccion.nombre + if (s.seccion.terminada) " ✓" else "", M, y0 + 8.5f, fe)
+            relleno.color = PEND; c.drawRect(x0, y0, x0 + w, y0 + alto, relleno)
+            relleno.color = GEO
+            s.cobertura.tramos.forEach { t -> c.drawRect(xDe(t.ini), y0, xDe(t.fin).coerceAtLeast(xDe(t.ini) + 0.8f), y0 + alto, relleno) }
+            relleno.color = GEO_DIA
+            Calc.cobertura(Calc.deSeccion(delDia, s.seccion.nombre), p).tramos.forEach { t ->
+                c.drawRect(xDe(t.ini), y0, xDe(t.fin).coerceAtLeast(xDe(t.ini) + 1.2f), y0 + alto, relleno)
+            }
+            c.drawRect(x0, y0, x0 + w, y0 + alto, borde)
+            val pct = Fmt.pct(s.porcentaje)
+            h.y += alto + 4f
+            c.drawText(pct, x0 + w - tp(6.5f).measureText(pct) - 2f, y0 + 8.3f, tp(6.5f, true))
+        }
         // Marcas cada 100 m
         val f = tp(6.3f, color = GRIS)
         var a = Math.ceil(p.absIni / 100.0) * 100.0
         while (a <= p.absFin + 1e-6) {
             val x = xDe(a)
-            c.drawLine(x, y0 + alto, x, y0 + alto + 3f, borde)
+            c.drawLine(x, h.y - 4f, x, h.y - 1f, borde)
             val t = Abscisa.texto(a).substringBefore('.')
             val tw = f.measureText(t)
-            c.drawText(t, (x - tw / 2).coerceIn(x0, x0 + w - tw), y0 + alto + 10f, f)
+            c.drawText(t, (x - tw / 2).coerceIn(x0, x0 + w - tw), h.y + 6f, f)
             a += 100.0
         }
-        // Leyenda
-        val ly = y0 + alto + 20f
+        val ly = h.y + 16f
         var lx = x0
         listOf(GEO to "Instalado", GEO_DIA to "Instalado en la jornada", PEND to "Pendiente").forEach { (col, et) ->
             if (et.endsWith("jornada") && delDia.isEmpty()) return@forEach
@@ -189,10 +199,75 @@ object Pdf {
         h.y = ly + 4f
     }
 
+    /** Curva S: avance real (azul) vs proyectado según rendimientos (amarillo: últimos turnos; gris: promedio). */
+    private fun curvaS(h: Hojas, cs: CurvaS, p: Proyecto) {
+        if (cs.real.isEmpty()) return
+        val alto = 190f
+        h.espacio(alto + 46f)
+        val c = h.c
+        val izq = M + 34f; val der = M + ancho - 8f; val arr = h.y + 6f; val aba = h.y + alto
+        val todos = cs.real + cs.proyReciente + cs.proyPromedio
+        val x0 = todos.minOf { it.fecha.toEpochDay() }.toDouble()
+        val x1 = maxOf(todos.maxOf { it.fecha.toEpochDay() }.toDouble(), x0 + 1)
+        fun px(d: java.time.LocalDate) = (izq + (d.toEpochDay() - x0) / (x1 - x0) * (der - izq)).toFloat()
+        fun py(m: Double) = (aba - (m / cs.total).coerceIn(0.0, 1.0) * (aba - arr)).toFloat()
+        val rej = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 0.4f; color = Color.rgb(200, 206, 214) }
+        val f = tp(6.5f, color = GRIS)
+        for (k in 0..4) {
+            val y = py(cs.total * k / 4.0)
+            c.drawLine(izq, y, der, y, rej)
+            val t = "${k * 25} %"
+            c.drawText(t, izq - 4f - f.measureText(t), y + 2.5f, f)
+        }
+        // Marcas mensuales
+        var mes = java.time.LocalDate.ofEpochDay(x0.toLong()).withDayOfMonth(1).plusMonths(1)
+        while (mes.toEpochDay() <= x1) {
+            val x = px(mes)
+            c.drawLine(x, arr, x, aba, rej)
+            val t = mes.format(DateTimeFormatter.ofPattern("MMM yyyy", Fmt.ES))
+            c.drawText(t, x - f.measureText(t) / 2, aba + 9f, f)
+            mes = mes.plusMonths(1)
+        }
+        c.drawLine(izq, arr, izq, aba, borde); c.drawLine(izq, aba, der, aba, borde)
+        fun linea(pts: List<PuntoCurva>, color: Int, ancho: Float, punteada: Boolean) {
+            if (pts.size < 2) return
+            val pa = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE; strokeWidth = ancho; this.color = color
+                if (punteada) pathEffect = android.graphics.DashPathEffect(floatArrayOf(5f, 3f), 0f)
+            }
+            val path = android.graphics.Path()
+            pts.forEachIndexed { i, q -> if (i == 0) path.moveTo(px(q.fecha), py(q.metros)) else path.lineTo(px(q.fecha), py(q.metros)) }
+            c.drawPath(path, pa)
+        }
+        linea(cs.proyPromedio, GRIS, 1.2f, true)
+        linea(cs.proyReciente, GEO, 1.8f, true)
+        linea(cs.real, AZUL, 2f, false)
+        val ult = cs.real.last()
+        relleno.color = AZUL; c.drawCircle(px(ult.fecha), py(ult.metros), 2.6f, relleno)
+        val fu = tp(7f, true, AZUL)
+        c.drawText("${Fmt.pct(ult.metros / cs.total)} al ${T.fechaCorta(ult.fecha.toString())}", px(ult.fecha) - 40f, py(ult.metros) - 6f, fu)
+        cs.proyReciente.lastOrNull()?.let { q ->
+            c.drawText("100 % ≈ ${T.fechaCorta(q.fecha.toString())}", (px(q.fecha) - 62f).coerceAtLeast(izq), py(q.metros) - 4f, tp(7f, true, Color.rgb(138, 100, 0)))
+        }
+        h.y = aba + 14f
+        val ley = tp(7f)
+        var lx = izq
+        fun item(col: Int, t: String, punt: Boolean) {
+            val pa = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = col
+                if (punt) pathEffect = android.graphics.DashPathEffect(floatArrayOf(4f, 2f), 0f) }
+            c.drawLine(lx, h.y - 2.5f, lx + 16f, h.y - 2.5f, pa)
+            c.drawText(t, lx + 20f, h.y, ley); lx += 30f + ley.measureText(t)
+        }
+        item(AZUL, "Avance real acumulado", false)
+        if (cs.proyReciente.isNotEmpty()) item(GEO, "Proyectado últimos ${p.turnosParaEta} turnos (${Fmt.num(cs.mPorDiaReciente)} m/día) → ${T.fechaCorta(cs.proyReciente.last().fecha.toString())}", true)
+        if (cs.proyPromedio.isNotEmpty()) item(GRIS, "Proyectado promedio (${Fmt.num(cs.mPorDiaPromedio)} m/día) → ${T.fechaCorta(cs.proyPromedio.last().fecha.toString())}", true)
+        h.y += 6f
+    }
+
     // ---------- Tabla de registros ----------
 
     private val COLS = listOf(
-        "Fecha" to 46f, "Turno" to 34f, "Abscisa\ninicial" to 54f, "Abscisa\nfinal" to 54f, "Longitud\n(m)" to 42f,
+        "Fecha" to 40f, "Sección" to 44f, "Abscisa\ninicial" to 54f, "Abscisa\nfinal" to 54f, "Longitud\n(m)" to 42f,
         "Perímetro\n(m)" to 42f, "Área\n(m²)" to 48f, "Horario" to 56f, "Horas" to 32f, "m/h" to 32f, "m²/h" to 38f,
         "Rollos" to 72f, "T° cuña\n(°C)" to 36f, "Vel.\n(m/min)" to 34f, "Prueba de\npresión" to 48f, "Geotextil" to 68f
     )
@@ -215,8 +290,9 @@ object Pdf {
             val alertaT = r.tempCuna != null && ((p.tempMin != null && r.tempCuna < p.tempMin) || (p.tempMax != null && r.tempCuna > p.tempMax))
             val alertaV = r.velSoldadura != null && ((p.velMin != null && r.velSoldadura < p.velMin) || (p.velMax != null && r.velSoldadura > p.velMax))
             val vals = listOf(
-                T.fechaCorta(r.fecha).take(5), r.turno, Abscisa.texto(r.absIni), Abscisa.texto(r.absFin),
-                Fmt.fijo(r.longitud) + if (r.longitudManual != null) "*" else "", Fmt.num(r.perimetro), Fmt.fijo(r.area),
+                T.fechaCorta(r.fecha).take(5), r.seccion, Abscisa.texto(r.absIni), Abscisa.texto(r.absFin),
+                Fmt.fijo(r.longitud) + if (r.longitudManual != null) "*" else "", Fmt.num(r.perimetro),
+                Fmt.fijo(r.area) + if (r.areaManual != null) "°" else "",
                 if (r.horaIni.isNotBlank() || r.horaFin.isNotBlank()) "${r.horaIni}–${r.horaFin}" else "",
                 Fmt.num(hrs), Fmt.num(hrs?.let { r.longitud / it }), Fmt.num(if (hrs != null && r.area != null) r.area!! / hrs else null, 1),
                 r.rollos.joinToString(", "),
@@ -246,9 +322,13 @@ object Pdf {
         celda(h.c, x, h.y, ancho - (x - M), 17f, "", tot, fondo = CLARO)
         h.y += 17f
         h.alCambiar = null
-        if (regs.any { it.longitudManual != null }) {
+        val notasTabla = listOfNotNull(
+            if (regs.any { it.longitudManual != null }) "* Longitud ajustada a mano." else null,
+            if (regs.any { it.areaManual != null }) "° Cantidad oficial en m² (difiere de longitud × perímetro por redondeo)." else null
+        )
+        if (notasTabla.isNotEmpty()) {
             h.espacio(12f)
-            h.y += 2f + texto(h.c, M, h.y + 2f, ancho, "* Longitud ajustada a mano (traslapos); el área usa esa longitud.", tp(6.8f, color = GRIS))
+            h.y += 2f + texto(h.c, M, h.y + 2f, ancho, notasTabla.joinToString("   "), tp(6.8f, color = GRIS))
         }
     }
 
@@ -335,17 +415,17 @@ object Pdf {
     }
 
     private fun anexoFotos(ctx: Context, h: Hojas, p: Proyecto, logo: Bitmap?, regs: List<Registro>, fotos: List<Foto>) {
-        val porReg = fotos.groupBy { it.registroId }
-        regs.filter { porReg[it.id]?.isNotEmpty() == true }.forEach { r ->
+        val porDia = fotos.groupBy { it.jornada }
+        Calc.porFecha(regs).filter { porDia[it.fecha]?.isNotEmpty() == true }.forEach { d ->
             h.nueva()
             encabezado(h, p, logo, "Anexo fotográfico")
             h.y += 6f
-            celda(h.c, M, h.y, ancho, 18f,
-                "${T.fechaLarga(r.fecha)} · Turno ${r.turno} · ${Abscisa.texto(r.absIni)} – ${Abscisa.texto(r.absFin)} · " +
-                    "${Fmt.fijo(r.longitud)} m × ${Fmt.num(r.perimetro)} m = ${Fmt.fijo(r.area)} m²",
-                tp(8.5f, true, AZUL), fondo = CLARO)
+            val resumenDia = Calc.metricas(d.registros, p).joinToString("  ·  ") { g ->
+                "${g.nombre}: ${Fmt.fijo(g.total.longitud)} m, ${Fmt.fijo(g.total.area)} m²"
+            }
+            celda(h.c, M, h.y, ancho, 18f, "${T.fechaLarga(d.fecha)}  ·  $resumenDia", tp(8.5f, true, AZUL), fondo = CLARO)
             h.y += 22f
-            val mapa = porReg[r.id].orEmpty().associateBy { it.momento }
+            val mapa = porDia[d.fecha].orEmpty().associateBy { it.momento }
             val gap = 8f
             val cw = (ancho - gap) / 2f
             val ch = (h.limite - h.y - gap) / 2f
@@ -371,6 +451,40 @@ object Pdf {
         }
     }
 
+    /** Tabla de avance global: un renglón por grupo (en negrilla) y uno por cada sección. */
+    private fun tablaAvance(h: Hojas, grupos: List<AvanceGrupo>, secs: List<AvanceSeccion>) {
+        val tit = listOf("Grupo / sección", "Perímetro (m)", "Cubierto (m)", "Avance", "Pendiente (m)", "Área instalada (m²)", "Área total (m²)", "Terminación estimada")
+        val rel = listOf(2.2f, 1f, 1.1f, 0.9f, 1.1f, 1.4f, 1.3f, 2f)
+        val ws = rel.map { it / rel.sum() * ancho }
+        val enc = tp(7f, true, Color.WHITE)
+        h.espacio(40f)
+        var x = M
+        tit.forEachIndexed { i, t -> celda(h.c, x, h.y, ws[i], 18f, t, enc, CENTRO, fondo = AZUL); x += ws[i] }
+        h.y += 18f
+        fun fila(v: List<String>, negrilla: Boolean) {
+            h.espacio(14f)
+            val f = tp(7.6f, negrilla, if (negrilla) AZUL else TINTA)
+            var xx = M
+            v.forEachIndexed { i, t -> celda(h.c, xx, h.y, ws[i], 14f, t, f, if (i == 0) NORMAL else CENTRO, fondo = if (negrilla) CLARO else null); xx += ws[i] }
+            h.y += 14f
+        }
+        fun eta(f: LocalDateTime?, terminada: Boolean) = if (terminada) "Terminada" else f?.format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")) ?: "–"
+        grupos.forEach { g ->
+            fila(listOf(g.nombre, "", "", Fmt.pct(g.porcentaje), if (g.terminada) "–" else Fmt.fijo(g.pendiente), Fmt.fijo(g.rend.area),
+                Fmt.fijo(g.areaTotal), eta(g.etaFecha, g.terminada)), true)
+            if (g.secciones.size > 1 || g.secciones.first().seccion.nombre != g.nombre) g.secciones.forEach { s ->
+                fila(listOf("   " + s.seccion.nombre, Fmt.num(s.seccion.perimetro), Fmt.fijo(s.cobertura.cubierto), Fmt.pct(s.porcentaje),
+                    if (s.seccion.terminada) "–" else Fmt.fijo(s.cobertura.restante), Fmt.fijo(s.rend.area), Fmt.fijo(s.areaTotal),
+                    eta(s.eta.fechaHora, s.terminada)), false)
+            }
+        }
+        fila(listOf("TOTAL PROYECTO", "", "", Fmt.pct(Calc.avanceGlobal(secs)), "", Fmt.fijo(secs.sumOf { it.rend.area }),
+            Fmt.fijo(secs.sumOf { it.areaTotal }), ""), true)
+        h.espacio(12f)
+        h.y += 2f + texto(h.c, M, h.y + 2f, ancho, "Avance por área (perímetro × metros cubiertos, sin contar traslapos). Las secciones terminadas cuentan al 100 %.",
+            tp(6.8f, color = GRIS))
+    }
+
     /**
      * @param dia fecha (yyyy-MM-dd) para el reporte diario; null = informe de avance de todo el proyecto.
      */
@@ -386,18 +500,16 @@ object Pdf {
 
         val acumulado = Calc.ordenar(if (dia == null) todos else todos.filter { it.fecha <= dia })
         val alcance = if (dia == null) acumulado else acumulado.filter { it.fecha == dia }
-        val cob = Calc.cobertura(acumulado, p)
-        val eta = Calc.eta(acumulado, p, cob)
-        val rendAc = Calc.rendimiento(acumulado)
-        val areaTot = Calc.areaTotal(p)
+        val secs = Calc.porSeccion(acumulado, p)
+        val grupos = Calc.porGrupo(secs).sortedBy { it.terminada }
 
         encabezado(h, p, logo, if (dia == null) "Informe de avance acumulado" else "Reporte diario de instalación")
         filaInfo(h, listOf(
             "Proyecto:" to p.nombre,
             "Abscisas del túnel:" to "${Abscisa.texto(p.absIni)} – ${Abscisa.texto(p.absFin)}",
             "Longitud:" to "${Fmt.fijo(p.longitudTotal)} m",
-            "Perímetro ref.:" to (p.perimetroDefecto?.let { "${Fmt.num(it)} m" } ?: "–")
-        ), listOf(50f, 120f, 82f, 140f, 44f, 80f, 62f, 158f).let { l -> val s = l.sum(); l.map { it / s * ancho } })
+            "Secciones:" to p.secciones.joinToString(", ") { "${it.nombre} ${Fmt.num(it.perimetro)} m" }
+        ), listOf(46f, 110f, 82f, 130f, 44f, 70f, 50f, 204f).let { l -> val s = l.sum(); l.map { it / s * ancho } })
         filaInfo(h, listOf(
             (if (dia == null) "Corte al:" else "Fecha:") to (if (dia == null) T.fechaLarga(acumulado.lastOrNull()?.fecha ?: T.hoy()) else T.fechaLarga(dia)),
             "Turnos:" to alcance.map { it.turno }.distinct().joinToString(" y ").ifBlank { "–" },
@@ -406,24 +518,37 @@ object Pdf {
         h.y += 6f
 
         if (dia != null) {
-            val rd = Calc.rendimiento(alcance)
-            kpis(h, listOf(
-                Triple("Longitud instalada en la jornada", "${Fmt.fijo(rd.longitud)} m", "${alcance.size} registro(s)"),
-                Triple("Área cubierta en la jornada", "${Fmt.fijo(rd.area)} m²", "longitud × perímetro"),
-                Triple("Horas trabajadas", Fmt.duracion(rd.minutos.toDouble()), ""),
-                Triple("Rendimiento", "${Fmt.num(rd.mPorHora)} m/h", "${Fmt.num(rd.m2PorHora, 1)} m²/h")
-            ), fondo = Color.rgb(255, 246, 214))
-            h.y += 4f
+            titulo(h, "Métricas de la jornada")
+            val mets = Calc.metricas(alcance, p)
+            if (mets.isEmpty()) {
+                h.y += 2f + texto(h.c, M, h.y + 4f, ancho, "Sin registros en esta fecha.", tp(8f))
+            }
+            mets.forEach { g ->
+                h.espacio(60f)
+                h.y += 4f
+                val r = g.total
+                kpis(h, listOf(
+                    Triple(g.nombre, "${Fmt.fijo(r.longitud)} m", "${r.registros} registro(s)"),
+                    Triple("Área cubierta", "${Fmt.fijo(r.area)} m²", "longitud × perímetro"),
+                    Triple("Horas trabajadas", if (r.minutos > 0) Fmt.duracion(r.minutos.toDouble()) else "–", ""),
+                    Triple("Rendimiento", if (r.mPorHora != null) "${Fmt.num(r.mPorHora)} m/h" else "–",
+                        if (r.m2PorHora != null) "${Fmt.num(r.m2PorHora, 1)} m²/h" else "registrar horario")
+                ), alto = 40f, fondo = Color.rgb(255, 246, 214))
+                if (g.porSeccion.size > 1 || g.porSeccion.first().first.nombre != g.nombre) {
+                    val det = g.porSeccion.joinToString("   ·   ") { (s, rr) -> "${s.nombre}: ${Fmt.fijo(rr.longitud)} m × ${Fmt.num(s.perimetro)} m = ${Fmt.fijo(rr.area)} m²" }
+                    h.y += 2f + texto(h.c, M + 4f, h.y + 3f, ancho - 8f, det, tp(7.5f))
+                }
+            }
         }
-        kpis(h, listOf(
-            Triple("Avance acumulado", Fmt.pct(cob.porcentaje), "${Fmt.fijo(cob.cubierto)} de ${Fmt.fijo(cob.total)} m"),
-            Triple("Área acumulada", "${Fmt.fijo(rendAc.area)} m²", areaTot?.let { "de ${Fmt.fijo(it)} m² estimados" } ?: ""),
-            Triple("Pendiente", "${Fmt.fijo(cob.restante)} m", "${cob.pendientes.size} tramo(s)"),
-            Triple("Rendimiento acumulado", "${Fmt.num(rendAc.mPorHora)} m/h", "${Fmt.num(rendAc.m2PorHora, 1)} m²/h"),
-            Triple("Terminación estimada", if (eta.completado) "Completado" else (eta.fechaHora?.format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")) ?: "–"),
-                eta.mPorTurno?.let { "${Fmt.num(it)} m/turno (últimos ${eta.turnosUsados})" } ?: "sin datos")
-        ))
-        franja(h, p, acumulado, if (dia == null) emptyList() else alcance)
+
+        titulo(h, if (dia == null) "Avance global por grupo y sección" else "Avance acumulado al ${T.fechaCorta(dia)}")
+        tablaAvance(h, grupos, secs)
+        franjas(h, p, secs, if (dia == null) emptyList() else alcance)
+
+        secs.filter { !it.seccion.terminada && it.registros.isNotEmpty() }.forEach { s ->
+            titulo(h, "Curva S de avance · ${s.seccion.nombre} (real vs proyectado según rendimientos)")
+            curvaS(h, Calc.curvaS(acumulado, s.seccion, p), p)
+        }
 
         titulo(h, if (dia == null) "Registros de instalación" else "Registros de la jornada")
         tablaRegistros(h, alcance, p)
@@ -431,13 +556,14 @@ object Pdf {
 
         if (dia == null) {
             titulo(h, "Avance por fecha")
-            var acum = 0.0
-            tablaSimple(h, listOf("Fecha", "Turnos", "Longitud (m)", "Área (m²)", "Horas", "m/h", "m²/h", "Acumulado (m)"),
-                listOf(2f, 1f, 1.4f, 1.4f, 1f, 1f, 1f, 1.4f),
+            val nombres = grupos.map { it.nombre }
+            tablaSimple(h, listOf("Fecha") + nombres.flatMap { listOf("$it (m)", "$it (m²)") } + "Total (m²)",
+                listOf(1.4f) + nombres.flatMap { listOf(1f, 1.2f) } + 1.2f,
                 Calc.porFecha(acumulado).map { x ->
-                    val r = x.rend; acum += r.longitud
-                    listOf(T.fechaCorta(x.fecha), x.turnos.toString(), Fmt.fijo(r.longitud), Fmt.fijo(r.area),
-                        Fmt.num(r.minutos / 60.0), Fmt.num(r.mPorHora), Fmt.num(r.m2PorHora, 1), Fmt.fijo(acum))
+                    val m = Calc.metricas(x.registros, p).associateBy { it.nombre }
+                    listOf(T.fechaCorta(x.fecha)) + nombres.flatMap { n ->
+                        listOf(m[n]?.let { Fmt.fijo(it.total.longitud) } ?: "", m[n]?.let { Fmt.fijo(it.total.area) } ?: "")
+                    } + Fmt.fijo(x.rend.area)
                 })
             val rollos = Calc.porRollo(acumulado)
             if (rollos.isNotEmpty()) {
@@ -447,15 +573,19 @@ object Pdf {
                     rollos.map { listOf(it.codigo, it.registros.toString(), Fmt.fijo(it.longitud), Fmt.fijo(it.area),
                         T.fechaCorta(it.primera), T.fechaCorta(it.ultima)) })
             }
-            titulo(h, "Rendimiento por cuadrilla")
-            tablaSimple(h, listOf("Cuadrilla / responsable", "Turnos", "Longitud (m)", "Área (m²)", "Horas", "m/h", "m²/h"),
-                listOf(3f, 1f, 1.3f, 1.3f, 1f, 1f, 1f),
-                Calc.porCuadrilla(acumulado).map { listOf(it.nombre, it.turnos.toString(), Fmt.fijo(it.longitud), Fmt.fijo(it.area),
-                    Fmt.num(it.minutos / 60.0), Fmt.num(it.mPorHora), Fmt.num(it.m2PorHora, 1)) })
-            if (cob.pendientes.isNotEmpty()) {
+            val cuad = Calc.porCuadrilla(acumulado).filter { it.nombre != "Sin asignar" }
+            if (cuad.isNotEmpty()) {
+                titulo(h, "Rendimiento por cuadrilla")
+                tablaSimple(h, listOf("Cuadrilla / responsable", "Turnos", "Longitud (m)", "Área (m²)", "Horas", "m/h", "m²/h"),
+                    listOf(3f, 1f, 1.3f, 1.3f, 1f, 1f, 1f),
+                    cuad.map { listOf(it.nombre, it.turnos.toString(), Fmt.fijo(it.longitud), Fmt.fijo(it.area),
+                        Fmt.num(it.minutos / 60.0), Fmt.num(it.mPorHora), Fmt.num(it.m2PorHora, 1)) })
+            }
+            val pend = secs.filter { !it.seccion.terminada }.flatMap { s -> s.cobertura.pendientes.map { s.seccion.nombre to it } }
+            if (pend.isNotEmpty()) {
                 titulo(h, "Tramos pendientes por instalar")
-                tablaSimple(h, listOf("Desde", "Hasta", "Longitud (m)"), listOf(1f, 1f, 1f),
-                    cob.pendientes.map { listOf(Abscisa.texto(it.ini), Abscisa.texto(it.fin), Fmt.fijo(it.longitud)) })
+                tablaSimple(h, listOf("Sección", "Desde", "Hasta", "Longitud (m)"), listOf(1f, 1f, 1f, 1f),
+                    pend.map { (n, t) -> listOf(n, Abscisa.texto(t.ini), Abscisa.texto(t.fin), Fmt.fijo(t.longitud)) })
             }
         }
 

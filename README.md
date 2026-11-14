@@ -5,8 +5,20 @@ perímetro, **área cubierta**, rollos, parámetros de soldadura, fotos de la jo
 Funciona **100 % sin internet**: no tiene permiso de red, guarda todo en una base de datos interna del teléfono y genera
 los PDF y Excel en el mismo equipo.
 
-Proyecto configurado por defecto: **Túnel 0**, de **K6+176.57** a **K7+173.00** (**996,43 m**). Todo se puede cambiar en
-Configuración.
+Proyecto configurado por defecto: **Túnel 0**, de **K6+176.57** a **K7+173.00** (**996,43 m**), con tres secciones de
+geomembrana que avanzan por separado:
+
+| Sección | Perímetro | Grupo | Estado |
+|---|---|---|---|
+| Bota HD | 2,0 m | Bota | Terminada |
+| Bota HI | 2,0 m | Bota | Terminada |
+| Bóveda | 19,0 m | Bóveda | En curso |
+
+Todo se puede cambiar en Configuración (nombre, perímetro, grupo y "terminada" de cada sección).
+
+**Avance ya ejecutado incluido**: la app trae los 101 registros de bota y bóveda del 23/07/2026 al 13/11/2026
+(`app/src/main/assets/avance_inicial.csv`) y los carga sola la primera vez que se abre. Las cantidades en m² son las
+oficiales del registro, aunque difieran unas centésimas de longitud × perímetro.
 
 ## Cómo obtener el APK
 1. En este repositorio, pestaña **Actions** → "Compilar APK Control Geomembrana" (se ejecuta con cada cambio; también con
@@ -39,31 +51,36 @@ una versión nueva hay que desinstalar la anterior (haz antes una copia de segur
 
 ## Uso
 
-### Nuevo registro (un tramo instalado en un turno)
+### Nuevo registro (un tramo de una sección instalado en un turno)
 - **Fecha y turno** (Día / Noche), **responsable** y **cuadrilla**. Recuerda los últimos datos.
-- **Abscisa inicial y final**: se escriben como `K6+176.57`, `6+176,57` o `6176.57`. La app verifica que estén dentro del
-  túnel y que la final sea mayor. Propone la **siguiente abscisa pendiente** y avisa si el tramo se **traslapa** con otro
-  registro.
+- **Sección** (Bóveda, Bota HD, Bota HI…): propone su perímetro.
+- **Abscisa inicial y final**: se escriben como `K6+512.39`, `6+512,39` o `6512.39`, **en el sentido en que se avanza**
+  (la bóveda va de K7+173 hacia K6+176). La app propone continuar donde terminó el último registro de esa sección, avisa
+  si el tramo se **traslapa** con otro de la misma sección y si se sale del túnel configurado.
 - **Longitud** = abscisa final − inicial. Con "Ajustar (traslapo)" se puede corregir a mano.
 - **Perímetro** instalado (desarrollo de la sección; por defecto 12,5 m, configurable).
 - **Área cubierta = longitud × perímetro**, visible en grande mientras se llena el formulario, en cada registro, en el total
-  de cada día y en el acumulado.
+  de cada día y en el acumulado. Con "Usar cantidad oficial" se puede escribir el m² del acta si difiere por redondeo.
 - **Hora de inicio y fin** con botón **Ahora** (calcula duración, m/h y m²/h; admite turnos que pasan la medianoche).
 - **Rollos** utilizados (códigos).
 - **Calidad**: temperatura de cuña / extrusora, velocidad de soldadura, prueba de presión del canal de aire
   (Aprobado / No aprobado / N.A.) y estado del geotextil. Marca en rojo lo que esté fuera de especificación.
-- **Fotos de la jornada**: cuatro casillas, **Inicio**, **Intermedia 1**, **Intermedia 2** y **Final**. Cada una con la cámara o
-  desde la galería; se guardan reducidas en el teléfono, con la fecha y hora en que se tomaron.
+- **Fotos de la jornada**: cuatro casillas por día, **Inicio**, **Intermedia 1**, **Intermedia 2** y **Final**, con la cámara o
+  desde la galería; se guardan reducidas en el teléfono, con la fecha y hora en que se tomaron. También se cargan desde el
+  botón "Fotos" de cada día en la pantalla principal.
 - **Notas**: interferencias geológicas, demoras por sostenimiento, filtraciones, etc.
 
 Toca cualquier registro para corregirlo o eliminarlo.
 
 ### Pantalla principal
-Avance acumulado (% y metros), franja del túnel con lo instalado y lo pendiente, área instalada frente al área total,
-rendimiento (m/h y m²/h) y **fecha y hora estimadas de terminación**. Debajo, los registros agrupados por día con los
-metros, los **m² cubiertos** y las horas de cada jornada.
+Una tarjeta por grupo, **Bóveda** y **Bota** por separado: avance (% por área), m² instalados frente al total, franja del
+túnel de cada sección, tramo pendiente y **fecha estimada de terminación**. Debajo, cada día con los metros y **m² de la
+jornada por grupo**, el botón de fotos (x/4) y el reporte diario.
 
-### Estadísticas y proyección
+### Estadísticas, curva S y proyección
+Se eligen **Bóveda**, **Bota** o **Todo el proyecto**:
+- **Curva S** de cada sección en curso (la bóveda): avance real acumulado frente al avance **proyectado según los
+  rendimientos**: con el promedio de los últimos turnos (amarillo) y con el promedio de todos los turnos (gris).
 - Avance cubierto **sin contar dos veces los traslapos**, longitud registrada, tramos pendientes y traslapos detectados.
 - Rendimiento global, por fecha (gráfico de barras) y **por cuadrilla**.
 - **Desglose por rollo** (si un registro usa varios rollos, su longitud y área se reparten entre ellos).
@@ -73,11 +90,20 @@ metros, los **m² cubiertos** y las horas de cada jornada.
 - Resumen de calidad y alertas.
 
 ### Informes
-- **Reporte diario (PDF con fotos)**: botón en cada día. Incluye la longitud, el **área cubierta en la jornada**, las horas,
-  el rendimiento, el avance acumulado a esa fecha, la franja del túnel con lo instalado ese día, la tabla de registros, la
-  calidad, las firmas y el **anexo con las 4 fotos** de cada registro.
-- **Informe de avance (PDF)**: todo el proyecto, con avance por fecha, rollos, cuadrillas y tramos pendientes (con o sin fotos).
-- **Excel**: hojas Resumen, Registros (con área como fórmula), Por fecha, Rollos, Cuadrillas y Tramos pendientes.
+- **Reporte diario (PDF con fotos)**: botón en cada día. **Métricas de la jornada por grupo** (Bóveda / Bota: longitud,
+  área cubierta, horas, rendimiento, con el detalle HD / HI), avance global acumulado a esa fecha por grupo y sección,
+  franjas del túnel con lo instalado ese día, **curva S de la bóveda**, tabla de registros, calidad, firmas y el **anexo con
+  las 4 fotos** de la jornada.
+- **Informe de avance (PDF)**: avance global por grupo y sección, curva S, avance por fecha separado por grupo, rollos,
+  cuadrillas y tramos pendientes (con o sin fotos).
+- **Excel**: hojas Resumen (por grupo y sección), Registros, Por fecha (m y m² de cada grupo), Curva S (datos real y
+  proyectados), Cuadrillas y Rollos.
+
+### Importar avance
+Menú ⋮ → "Importar avance (CSV / texto)". Primera fila con títulos: `Sección | Fecha | PK inicial | PK final | Longitud (m) |
+Cantidad (m²)` (opcionales: Turno, Responsable, Cuadrilla, Rollos, Notas). Separado por `;`, `,` o tabulador. Fechas
+`2026-07-23`, `23/07/2026` o `7/23/2026` (se detecta el formato). No repite registros que ya existen (misma sección, fecha
+y abscisas). Muestra un resumen antes de importar.
 
 Al terminar, cada archivo se puede **abrir, compartir** (WhatsApp, correo) o **guardar** en el teléfono.
 
@@ -95,8 +121,9 @@ la ficha técnica del fabricante), modo de color (claro para sol directo, oscuro
 | Archivo | Contenido |
 |---|---|
 | `Modelo.kt` | Registro, Proyecto, enumeraciones (sin dependencias de Android) |
-| `Calculos.kt` | Abscisas, cobertura y traslapos, rendimiento, proyección, desgloses y calidad (sin Android, con pruebas) |
-| `Db.kt` | Base SQLite (`registros`, `fotos`) |
+| `Calculos.kt` | Abscisas, cobertura por sección, grupos, rendimiento, proyección, curva S, desgloses y calidad (sin Android, con pruebas) |
+| `Importacion.kt` | Lectura de avances en CSV / texto (sin Android, con pruebas) |
+| `Db.kt` | Base SQLite (`registros`, `fotos_jornada`) |
 | `Fotos.kt` | Cámara / galería, orientación EXIF y reducción |
 | `Pdf.kt`, `Excel.kt` | Informes generados sin librerías externas |
 | `Respaldo.kt` | Copia de seguridad .zip |

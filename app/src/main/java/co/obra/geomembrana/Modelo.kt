@@ -1,5 +1,9 @@
 package co.obra.geomembrana
 
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+
 /*
  * Modelo de datos. Este archivo y Calculos.kt no dependen de Android:
  * se prueban con JUnit en la JVM (app/src/test).
@@ -27,7 +31,7 @@ enum class Geotextil(val etiqueta: String) {
     }
 }
 
-/** Las cuatro fotos de la jornada de instalación de cada registro. */
+/** Las cuatro fotos de cada jornada (reporte diario). */
 enum class Momento(val etiqueta: String, val corto: String) {
     INICIO("Inicio de la jornada", "Inicio"),
     INTERMEDIA_1("Momento intermedio 1", "Intermedia 1"),
@@ -42,22 +46,35 @@ object Turnos {
 }
 
 /**
- * Un registro de avance: lo instalado por una cuadrilla en un turno, entre dos abscisas.
- * Las abscisas se guardan en metros (K6+176.57 = 6176.57).
+ * Sección de la geomembrana que se instala a lo largo del túnel (bota HD, bota HI, bóveda…).
+ * Cada sección avanza por su cuenta y tiene su propio perímetro (desarrollo transversal).
+ * [terminada]: la sección se da por completa aunque por abscisas falten centímetros (se cuenta al 100 %).
+ * [grupo]: las secciones del mismo grupo se reportan juntas (Bota = HD + HI); vacío = la sección es su propio grupo.
+ */
+data class Seccion(val nombre: String, val perimetro: Double, val terminada: Boolean = false, val grupo: String = "") {
+    val grupoEfectivo: String get() = grupo.trim().ifBlank { nombre }
+}
+
+/**
+ * Un registro de avance: lo instalado de una sección en un turno, entre dos abscisas.
+ * Las abscisas se guardan en metros (K6+176.57 = 6176.57) y en el orden en que se escribieron:
+ * la instalación puede avanzar en cualquier sentido (p. ej. de K7+173 hacia K6+176).
  */
 data class Registro(
     val id: String,
     val fecha: String,              // yyyy-MM-dd (fecha en que inicia el turno)
     val turno: String,              // "Día" | "Noche"
-    val responsable: String,        // topógrafo / residente / inspector
-    val cuadrilla: String,          // cuadrilla o frente de instalación (opcional)
-    val absIni: Double,
-    val absFin: Double,
+    val seccion: String,            // nombre de la sección
+    val responsable: String,
+    val cuadrilla: String,
+    val absIni: Double,             // abscisa donde empezó la instalación
+    val absFin: Double,             // abscisa donde terminó
     val horaIni: String,            // HH:mm
     val horaFin: String,            // HH:mm (si es menor que la inicial, cruzó la medianoche)
-    val longitudManual: Double?,    // null = se usa absFin - absIni
+    val longitudManual: Double?,    // null = |absFin - absIni|
     val perimetro: Double?,         // desarrollo transversal instalado (m)
-    val rollos: List<String>,       // códigos de los rollos usados
+    val areaManual: Double?,        // cantidad oficial en m² si difiere de longitud × perímetro (redondeos)
+    val rollos: List<String>,
     val tempCuna: Double?,          // °C
     val velSoldadura: Double?,      // m/min
     val prueba: Prueba,
@@ -65,20 +82,24 @@ data class Registro(
     val notas: String,
     val creado: String
 ) {
-    /** Longitud por abscisas, sin ajuste. */
-    val longitudAbscisas: Double get() = absFin - absIni
+    /** Abscisa menor y mayor del tramo, sin importar el sentido. */
+    val desde: Double get() = min(absIni, absFin)
+    val hasta: Double get() = max(absIni, absFin)
 
-    /** Longitud que cuenta para rendimiento: la ajustada a mano (traslapos) o la de abscisas. */
+    /** Longitud por abscisas. */
+    val longitudAbscisas: Double get() = abs(absFin - absIni)
+
+    /** Longitud que cuenta para rendimiento: la ajustada a mano o la de abscisas. */
     val longitud: Double get() = longitudManual ?: longitudAbscisas
 
-    /** Área instalada en m² (longitud × perímetro). Null si no hay perímetro. */
-    val area: Double? get() = perimetro?.let { longitud * it }
+    /** Área instalada en m²: la cantidad oficial si se ajustó, si no longitud × perímetro. */
+    val area: Double? get() = areaManual ?: perimetro?.let { longitud * it }
 
     /** Minutos trabajados en el turno. */
     val minutos: Int? get() = Horas.diff(horaIni, horaFin)
 }
 
-/** Datos fijos del proyecto (editables en Configuración). */
+/** Datos del proyecto (editables en Configuración). */
 data class Proyecto(
     val nombre: String = "Túnel 0",
     val empresa: String = "",
@@ -86,8 +107,8 @@ data class Proyecto(
     val codigoFormato: String = "",
     val absIni: Double = 6176.57,
     val absFin: Double = 7173.00,
-    val perimetroDefecto: Double? = 12.5,
-    val turnosPorDia: Int = 2,           // 1 = solo turno día, 2 = día y noche
+    val secciones: List<Seccion> = SECCIONES,
+    val turnosPorDia: Int = 1,           // 1 = solo turno día, 2 = día y noche
     val horaInicioDia: String = "06:00",
     val horaInicioNoche: String = "18:00",
     val turnosParaEta: Int = 6,          // últimos turnos que se promedian para la proyección
@@ -97,6 +118,22 @@ data class Proyecto(
     val velMax: Double? = null
 ) {
     val longitudTotal: Double get() = absFin - absIni
+
+    fun seccion(nombre: String): Seccion? = secciones.firstOrNull { Texto.clave(it.nombre) == Texto.clave(nombre) }
+
+    companion object {
+        val SECCIONES = listOf(
+            Seccion("Bota HD", 2.0, terminada = true, grupo = "Bota"),
+            Seccion("Bota HI", 2.0, terminada = true, grupo = "Bota"),
+            Seccion("Bóveda", 19.0, grupo = "Bóveda")
+        )
+    }
+}
+
+object Texto {
+    /** "Bóveda " -> "boveda": para comparar nombres sin tildes, mayúsculas ni espacios extra. */
+    fun clave(s: String): String = java.text.Normalizer.normalize(s.trim().lowercase(), java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}"), "").replace(Regex("\\s+"), " ")
 }
 
 object Horas {
