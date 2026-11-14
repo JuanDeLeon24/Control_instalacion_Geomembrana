@@ -20,7 +20,7 @@ import java.time.format.DateTimeFormatter
 /**
  * Informes en PDF (carta horizontal) generados en el teléfono:
  *  - Reporte diario: lo instalado en una fecha (longitud, perímetro y ÁREA de la jornada),
- *    avance acumulado, calidad y anexo con las 4 fotos de cada registro.
+ *    avance acumulado, curva S y anexo con las 4 fotos de la jornada.
  *  - Informe de avance: todo el proyecto, con desgloses por fecha, rollo y cuadrilla.
  */
 object Pdf {
@@ -269,11 +269,11 @@ object Pdf {
     private val COLS = listOf(
         "Fecha" to 40f, "Sección" to 44f, "Abscisa\ninicial" to 54f, "Abscisa\nfinal" to 54f, "Longitud\n(m)" to 42f,
         "Perímetro\n(m)" to 42f, "Área\n(m²)" to 48f, "Horario" to 56f, "Horas" to 32f, "m/h" to 32f, "m²/h" to 38f,
-        "Rollos" to 72f, "T° cuña\n(°C)" to 36f, "Vel.\n(m/min)" to 34f, "Prueba de\npresión" to 48f, "Geotextil" to 68f
+        "Rollos" to 120f
     )
 
     private fun tablaRegistros(h: Hojas, regs: List<Registro>, p: Proyecto) {
-        val enc = tp(6.8f, true, Color.WHITE); val f = tp(7.2f); val fRojo = tp(7.2f, true, ROJO)
+        val enc = tp(6.8f, true, Color.WHITE); val f = tp(7.2f)
         val anchos = COLS.map { it.second }
         val extra = (ancho - anchos.sum()) / anchos.size
         val ws = anchos.map { it + extra }
@@ -287,24 +287,20 @@ object Pdf {
         h.alCambiar = { cabecera() }
         regs.forEach { r ->
             val hrs = r.minutos?.takeIf { it > 0 }?.let { it / 60.0 }
-            val alertaT = r.tempCuna != null && ((p.tempMin != null && r.tempCuna < p.tempMin) || (p.tempMax != null && r.tempCuna > p.tempMax))
-            val alertaV = r.velSoldadura != null && ((p.velMin != null && r.velSoldadura < p.velMin) || (p.velMax != null && r.velSoldadura > p.velMax))
             val vals = listOf(
                 T.fechaCorta(r.fecha).take(5), r.seccion, Abscisa.texto(r.absIni), Abscisa.texto(r.absFin),
                 Fmt.fijo(r.longitud) + if (r.longitudManual != null) "*" else "", Fmt.num(r.perimetro),
                 Fmt.fijo(r.area) + if (r.areaManual != null) "°" else "",
                 if (r.horaIni.isNotBlank() || r.horaFin.isNotBlank()) "${r.horaIni}–${r.horaFin}" else "",
                 Fmt.num(hrs), Fmt.num(hrs?.let { r.longitud / it }), Fmt.num(if (hrs != null && r.area != null) r.area!! / hrs else null, 1),
-                r.rollos.joinToString(", "),
-                Fmt.num(r.tempCuna, 1), Fmt.num(r.velSoldadura), r.prueba.etiqueta, r.geotextil.etiqueta
+                r.rollos.joinToString(", ")
             )
-            val hFila = maxOf(15f, alto(vals[11], f, ws[11]), alto(vals[15], f, ws[15]))
+            val hFila = maxOf(15f, alto(vals[11], f, ws[11]))
             h.espacio(hFila)
             var x = M
             vals.forEachIndexed { i, v ->
-                val rojo = (i == 12 && alertaT) || (i == 13 && alertaV) || (i == 14 && r.prueba == Prueba.NO_APROBADO)
-                celda(h.c, x, h.y, ws[i], hFila, v.ifBlank { if (i in 4..14) "–" else "" }, if (rojo) fRojo else f,
-                    if (i == 11 || i == 15) NORMAL else CENTRO)
+                celda(h.c, x, h.y, ws[i], hFila, v.ifBlank { if (i in 4..10) "–" else "" }, f,
+                    if (i == 11) NORMAL else CENTRO)
                 x += ws[i]
             }
             h.y += hFila
@@ -346,36 +342,6 @@ object Pdf {
             h.espacio(hh)
             celda(h.c, M, h.y, ancho, hh, t, f)
             h.y += hh
-        }
-    }
-
-    private fun calidad(h: Hojas, regs: List<Registro>, p: Proyecto) {
-        val q = Calc.calidad(regs, p)
-        titulo(h, "Control de calidad")
-        val f = tp(7.8f)
-        fun esp(a: Double?, b: Double?, u: String) = when {
-            a != null && b != null -> " (especificación ${Fmt.num(a)} a ${Fmt.num(b)} $u)"
-            a != null -> " (mínimo ${Fmt.num(a)} $u)"
-            b != null -> " (máximo ${Fmt.num(b)} $u)"
-            else -> ""
-        }
-        val lineas = listOf(
-            "Temperatura de cuña / extrusora: " + (if (q.conTemp == 0) "sin datos" else
-                "promedio ${Fmt.num(q.tempProm, 1)} °C, rango ${Fmt.num(q.tempMin, 1)} a ${Fmt.num(q.tempMax, 1)} °C" +
-                    esp(p.tempMin, p.tempMax, "°C") + (q.tempFuera?.let { " · $it fuera de especificación" } ?: "")),
-            "Velocidad de soldadura: " + (if (q.conVel == 0) "sin datos" else
-                "promedio ${Fmt.num(q.velProm)} m/min, rango ${Fmt.num(q.velMin)} a ${Fmt.num(q.velMax)} m/min" +
-                    esp(p.velMin, p.velMax, "m/min") + (q.velFuera?.let { " · $it fuera de especificación" } ?: "")),
-            "Prueba de presión del canal de aire: ${q.aprobadas} aprobadas · ${q.noAprobadas} no aprobadas · ${q.pruebasNA} N.A.",
-            "Geotextil de soporte: ${q.geoOk} OK · ${q.geoObs} con observaciones · ${q.geoNo} no inspeccionado"
-        )
-        lineas.forEach { t -> val hh = alto(t, f, ancho); h.espacio(hh); celda(h.c, M, h.y, ancho, hh, t, f); h.y += hh }
-        if (q.alertas.isNotEmpty()) {
-            val fr = tp(7.5f, color = ROJO)
-            q.alertas.forEach { (r, a) ->
-                val t = "${T.fechaCorta(r.fecha)} ${r.turno} (${Abscisa.texto(r.absIni)} – ${Abscisa.texto(r.absFin)}): ${a.joinToString(" · ")}"
-                val hh = alto(t, fr, ancho); h.espacio(hh); celda(h.c, M, h.y, ancho, hh, t, fr); h.y += hh
-            }
         }
     }
 
@@ -589,7 +555,6 @@ object Pdf {
             }
         }
 
-        calidad(h, alcance, p)
         firmas(h, alcance.map { it.responsable }.filter { it.isNotBlank() }.distinct())
 
         if (conFotos) anexoFotos(ctx, h, p, logo, alcance, fotos)

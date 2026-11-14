@@ -90,11 +90,11 @@ object Excel {
         // ---------- Registros ----------
         val porDia = fotos.groupBy { it.jornada }
         val reg = Hoja("Registros", listOf(11.0, 8.0, 12.0, 18.0, 16.0, 12.0, 12.0, 11.0, 11.0, 11.0, 11.0, 12.0, 9.0, 9.0, 9.0, 9.0, 10.0,
-            22.0, 11.0, 11.0, 13.0, 26.0, 36.0))
+            22.0, 36.0))
         reg.congelar = 1
         reg.fila(listOf("Fecha", "Turno", "Sección", "Responsable", "Cuadrilla", "PK inicial", "PK final", "Abs. inicial (m)",
             "Abs. final (m)", "Longitud (m)", "Perímetro (m)", "Cantidad (m²)", "Hora inicio", "Hora fin", "Horas", "m/h", "m²/h",
-            "Rollos", "Temp. cuña (°C)", "Vel. soldadura (m/min)", "Prueba de presión", "Geotextil", "Notas").map { c(it, ENC) }, 32.0)
+            "Rollos", "Notas").map { c(it, ENC) }, 32.0)
         regs.forEach { r ->
             val f = reg.siguiente
             val h = r.minutos?.takeIf { it > 0 }?.let { it / 60.0 }
@@ -109,8 +109,7 @@ object Excel {
                 },
                 hora(r.horaIni), hora(r.horaFin), d(h),
                 d(h?.let { r.longitud / it }), d(if (h != null && area != null) area / h else null),
-                c(r.rollos.joinToString(", "), TEXTO), d(r.tempCuna, NUM), d(r.velSoldadura),
-                c(r.prueba.etiqueta, CENTRO), c(r.geotextil.etiqueta, TEXTO), c(r.notas, TEXTO)))
+                c(r.rollos.joinToString(", "), TEXTO), c(r.notas, TEXTO)))
         }
         val ult = reg.filas.size
         if (regs.isNotEmpty()) {
@@ -120,7 +119,7 @@ object Excel {
                     c(Formula("SUM(O2:O$ult)", rend.minutos / 60.0), TOT_NUM)))
             reg.combinadas += "A${reg.filas.size}:I${reg.filas.size}"
         }
-        reg.filtro = "A1:W${maxOf(2, ult)}"
+        reg.filtro = "A1:S${maxOf(2, ult)}"
 
         // ---------- Por fecha, separado por grupo ----------
         val nombres = grupos.map { it.nombre }

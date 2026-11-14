@@ -22,7 +22,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -227,45 +233,23 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
         return
     }
 
-    BackHandler(enabled = ruta != "inicio") { ruta = "inicio" }
+    // Pestañas de la barra inferior y pantallas internas (con flecha para volver)
+    val pestana = when (ruta) { "informes" -> "informes"; "mas", "config" -> "mas"; "estadisticas" -> "informes"; else -> "inicio" }
+    val interna = ruta == "estadisticas" || ruta == "config"
+    BackHandler(enabled = ruta != "inicio") { ruta = if (interna) pestana else "inicio" }
+    val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(when (ruta) { "estadisticas" -> "Estadísticas"; "config" -> "Configuración"; else -> "Control Geomembrana" },
-                        fontWeight = FontWeight.Bold)
+                    Text(when (ruta) {
+                        "estadisticas" -> "Estadísticas y curva S"; "config" -> "Configuración"
+                        "informes" -> "Informes"; "mas" -> "Más opciones"; else -> "Control Geomembrana"
+                    }, fontWeight = FontWeight.Bold)
                 },
                 navigationIcon = {
-                    if (ruta != "inicio") IconButton(onClick = { ruta = "inicio" }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver") }
-                },
-                actions = {
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Menú") }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Informe de avance (PDF)") }, onClick = { menu = false; preguntarFotos = true })
-                        DropdownMenuItem(text = { Text("Exportar a Excel") }, onClick = { menu = false; excel() })
-                        DropdownMenuItem(text = { Text("Estadísticas y proyección") }, onClick = { menu = false; ruta = "estadisticas" })
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text("Importar avance (CSV / texto)") }, onClick = {
-                            menu = false; importarCsv.launch(arrayOf("text/*", "application/csv", "application/vnd.ms-excel", "application/octet-stream"))
-                        })
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text("Guardar copia de seguridad") }, onClick = {
-                            menu = false; exportarCopia.launch("Geomembrana_copia_${T.hoy()}.zip")
-                        })
-                        DropdownMenuItem(text = { Text("Copia ahora en Descargas") }, onClick = {
-                            menu = false
-                            trabajando = "Guardando copia en Descargas…"
-                            scope.launch {
-                                val r = runCatching { withContext(Dispatchers.IO) { Autocopia.hacer(ctx, db) } }
-                                trabajando = null
-                                aviso(if (r.isSuccess) "Copia guardada en Descargas/ControlGeomembrana" else "No se pudo guardar la copia")
-                            }
-                        })
-                        DropdownMenuItem(text = { Text("Restaurar copia de seguridad") }, onClick = { menu = false; confirmarRestaurar = true })
-                        HorizontalDivider()
-                        DropdownMenuItem(text = { Text("Configuración") }, onClick = { menu = false; ruta = "config" })
-                    }
+                    if (interna) IconButton(onClick = { ruta = pestana }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary, titleContentColor = MaterialTheme.colorScheme.onPrimary,
@@ -273,27 +257,53 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
                 )
             )
         },
-        floatingActionButton = {
-            if (ruta == "inicio") ExtendedFloatingActionButton(
-                onClick = { ruta = "nuevo:" + T.uid() },
-                icon = { Icon(Icons.Filled.Add, null) },
-                text = { Text("Nuevo registro", fontSize = 17.sp, fontWeight = FontWeight.Bold) },
-                containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary
-            )
+        bottomBar = {
+            NavigationBar {
+                listOf(
+                    Triple("inicio", Icons.Filled.Home, "Inicio"),
+                    Triple("registrar", Icons.Filled.AddCircle, "Registrar"),
+                    Triple("informes", Icons.Filled.Share, "Informes"),
+                    Triple("mas", Icons.Filled.Menu, "Más")
+                ).forEach { (clave, icono, texto) ->
+                    NavigationBarItem(
+                        selected = pestana == clave,
+                        onClick = { ruta = if (clave == "registrar") "nuevo:" + T.uid() else clave },
+                        icon = { Icon(icono, null, Modifier.size(30.dp)) },
+                        label = { Text(texto, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                    )
+                }
+            }
         },
         snackbarHost = { SnackbarHost(snack) }
     ) { pad ->
         when (ruta) {
             "estadisticas" -> ContenidoEstadisticas(proyecto, registros, pad)
             "config" -> ContenidoConfiguracion(proyecto, tema, hayLogo, pad,
-                alGuardar = { p -> proyecto = p; Ajustes.guardarProyecto(ctx, p); ruta = "inicio"; aviso("Configuración guardada") },
+                alGuardar = { p -> proyecto = p; Ajustes.guardarProyecto(ctx, p); ruta = "mas"; aviso("Configuración guardada") },
                 alTema = alCambiarTema,
                 alElegirLogo = { elegirLogo.launch("image/*") },
                 alQuitarLogo = { Logo.quitar(ctx); hayLogo = Logo.cargar(ctx) != null; aviso("Logo quitado") })
+            "informes" -> ContenidoInformes(proyecto, registros, pad,
+                alReporteDia = { reporteDia(it) }, alInformeGeneral = { preguntarFotos = true }, alExcel = { excel() },
+                alEstadisticas = { ruta = "estadisticas" })
+            "mas" -> ContenidoMas(pad, Autocopia.ultima(ctx), version,
+                alCopiaAhora = {
+                    trabajando = "Guardando copia en Descargas…"
+                    scope.launch {
+                        val r = runCatching { withContext(Dispatchers.IO) { Autocopia.hacer(ctx, db) } }
+                        trabajando = null
+                        aviso(if (r.isSuccess) "Copia guardada en Descargas/ControlGeomembrana" else "No se pudo guardar la copia")
+                    }
+                },
+                alCopiaOtroLugar = { exportarCopia.launch("Geomembrana_copia_${T.hoy()}.zip") },
+                alRestaurar = { confirmarRestaurar = true },
+                alImportar = { importarCsv.launch(arrayOf("text/*", "application/csv", "application/vnd.ms-excel", "application/octet-stream")) },
+                alConfiguracion = { ruta = "config" },
+                alEstadisticas = { ruta = "estadisticas" })
             else -> ContenidoInicio(
                 proyecto, registros, fotos.groupBy { it.jornada }.mapValues { it.value.size }, pad,
                 alAbrir = { ruta = "editar:" + it.id }, alReporteDia = { reporteDia(it) }, alFotosDia = { fotosDia = it },
-                alEstadisticas = { ruta = "estadisticas" }
+                alEstadisticas = { ruta = "estadisticas" }, alRegistrar = { ruta = "nuevo:" + T.uid() }
             )
         }
     }

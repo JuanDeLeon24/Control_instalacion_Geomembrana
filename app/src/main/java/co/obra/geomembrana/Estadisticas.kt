@@ -43,7 +43,6 @@ fun ContenidoEstadisticas(p: Proyecto, registros: List<Registro>, pad: PaddingVa
     val regs = grupo?.registros ?: registros
     val rend = Calc.rendimiento(regs)
     val porFecha = Calc.porFecha(regs)
-    val q = Calc.calidad(regs, p)
     val traslapos = Calc.todosLosTraslapos(regs)
 
     Column(Modifier.fillMaxSize().padding(pad).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
@@ -151,21 +150,6 @@ fun ContenidoEstadisticas(p: Proyecto, registros: List<Registro>, pad: PaddingVa
             }
         }
 
-        Bloque("Control de calidad") {
-            Linea("Temperatura cuña / extrusora", if (q.conTemp == 0) "sin datos" else
-                "${Fmt.num(q.tempProm, 1)} °C prom. (${Fmt.num(q.tempMin, 1)} a ${Fmt.num(q.tempMax, 1)})")
-            q.tempFuera?.let { Linea("   fuera de especificación", "$it") }
-            Linea("Velocidad de soldadura", if (q.conVel == 0) "sin datos" else
-                "${Fmt.num(q.velProm)} m/min prom. (${Fmt.num(q.velMin)} a ${Fmt.num(q.velMax)})")
-            q.velFuera?.let { Linea("   fuera de especificación", "$it") }
-            Linea("Pruebas de presión", "${q.aprobadas} aprob. · ${q.noAprobadas} no aprob. · ${q.pruebasNA} N.A.")
-            Linea("Geotextil", "${q.geoOk} OK · ${q.geoObs} con obs. · ${q.geoNo} sin inspección")
-            q.alertas.forEach { (r, a) ->
-                Spacer(Modifier.height(4.dp))
-                Etiqueta("${T.fechaCorta(r.fecha)} ${r.seccion} ${Abscisa.texto(r.absIni)}: ${a.joinToString(" · ")}",
-                    if (a.any { it.contains("no aprobada") || it.contains("fuera") }) 2 else 1)
-            }
-        }
         Spacer(Modifier.height(40.dp))
     }
 }

@@ -67,22 +67,36 @@ fun TarjetaGrupo(g: AvanceGrupo, p: Proyecto, registros: List<Registro>, compact
 @Composable
 fun ContenidoInicio(
     p: Proyecto, registros: List<Registro>, fotosPorDia: Map<String, Int>, pad: PaddingValues,
-    alAbrir: (Registro) -> Unit, alReporteDia: (String) -> Unit, alFotosDia: (String) -> Unit, alEstadisticas: () -> Unit
+    alAbrir: (Registro) -> Unit, alReporteDia: (String) -> Unit, alFotosDia: (String) -> Unit, alEstadisticas: () -> Unit,
+    alRegistrar: () -> Unit
 ) {
     val secciones = Calc.porSeccion(registros, p)
     val grupos = Calc.porGrupo(secciones).sortedBy { it.terminada }   // lo que está en curso, primero
     val dias = Calc.porFecha(registros).reversed()
 
-    LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = pad.calculateTopPadding() + 8.dp, bottom = 110.dp)) {
+    LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = pad.calculateTopPadding() + 8.dp, bottom = pad.calculateBottomPadding() + 24.dp)) {
         item {
             Text("${p.nombre} · ${Abscisa.texto(p.absIni)} a ${Abscisa.texto(p.absFin)} · ${Fmt.num(p.longitudTotal)} m",
                 fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+            // Acción principal, grande y arriba
+            OpcionMenu("➕", "Registrar avance de hoy", T.fechaLarga(T.hoy()), destacada = true, alTocar = alRegistrar)
+            val hoy = registros.filter { it.fecha == T.hoy() }
+            if (hoy.isNotEmpty()) {
+                val f = fotosPorDia[T.hoy()] ?: 0
+                Text("Hoy: " + Calc.metricas(hoy, p).joinToString("  ·  ") { "${it.nombre} ${Fmt.num(it.total.area, 2)} m²" } +
+                    "  ·  Fotos $f/4", fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 4.dp))
+            }
+            Text("AVANCE", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 12.dp))
         }
         items(grupos, key = { "g-" + it.nombre }) { g -> TarjetaGrupo(g, p, registros, compacta = g.terminada) }
         item {
             OutlinedButton(onClick = alEstadisticas, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Text("Estadísticas, curva S y proyección", fontSize = 16.sp)
+                Text("📈  Ver curva S y proyección", fontSize = 16.sp)
             }
+            Text("JORNADAS REGISTRADAS", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 14.dp))
+            Text("Toca un registro para corregirlo.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (dias.isEmpty()) item {
             Text("Aún no hay registros. Toca “Nuevo registro” para anotar el primer tramo instalado.",
@@ -103,8 +117,8 @@ fun ContenidoInicio(
                                 fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                         }
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
-                            OutlinedButton(onClick = { alFotosDia(d.fecha) }) { Text("Fotos $nFotos/4") }
-                            OutlinedButton(onClick = { alReporteDia(d.fecha) }) { Text("Reporte diario (PDF)") }
+                            OutlinedButton(onClick = { alFotosDia(d.fecha) }) { Text("📷 Fotos $nFotos/4", fontSize = 15.sp) }
+                            OutlinedButton(onClick = { alReporteDia(d.fecha) }) { Text("📄 Reporte PDF", fontSize = 15.sp) }
                         }
                     }
                 }
@@ -116,7 +130,6 @@ fun ContenidoInicio(
 
 @Composable
 private fun TarjetaRegistro(r: Registro, p: Proyecto, alTocar: () -> Unit) {
-    val alertas = Calc.alertas(r, p).filter { !it.startsWith("Longitud") }
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable(onClick = alTocar),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -140,11 +153,6 @@ private fun TarjetaRegistro(r: Registro, p: Proyecto, alTocar: () -> Unit) {
                 if (r.rollos.isNotEmpty()) "Rollos: ${r.rollos.joinToString(", ")}" else null
             )
             if (partes.isNotEmpty()) Text(partes.joinToString("  ·  "), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (r.prueba != Prueba.NA || alertas.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 6.dp)) {
-                if (r.prueba != Prueba.NA) Etiqueta("Presión: ${r.prueba.etiqueta}", if (r.prueba == Prueba.APROBADO) 0 else 2)
-                alertas.filter { !it.startsWith("Prueba") }.forEach { Etiqueta(it, 2) }
-            }
             if (r.notas.isNotBlank()) Text(r.notas, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp), maxLines = 3)
         }
     }

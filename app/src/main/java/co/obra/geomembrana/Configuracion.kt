@@ -50,10 +50,6 @@ fun ContenidoConfiguracion(
     var hDia by rememberSaveable { mutableStateOf(p.horaInicioDia) }
     var hNoche by rememberSaveable { mutableStateOf(p.horaInicioNoche) }
     var nEta by rememberSaveable { mutableStateOf(p.turnosParaEta.toString()) }
-    var tMin by rememberSaveable { mutableStateOf(t(p.tempMin, 1)) }
-    var tMax by rememberSaveable { mutableStateOf(t(p.tempMax, 1)) }
-    var vMin by rememberSaveable { mutableStateOf(t(p.velMin)) }
-    var vMax by rememberSaveable { mutableStateOf(t(p.velMax)) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
 
     val ini = Abscisa.leer(absIni); val fin = Abscisa.leer(absFin)
@@ -100,18 +96,6 @@ fun ContenidoConfiguracion(
             }
             Campo("Turnos que se promedian para la proyección", nEta, { nEta = it.filter { c -> c.isDigit() } }, numerico = true)
         }
-        Bloque("Especificaciones de soldadura") {
-            Text("Ajustar según la ficha técnica del fabricante de la geomembrana. Vacío = sin control.",
-                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Campo("Temp. mínima", tMin, { tMin = it }, Modifier.weight(1f), numerico = true, sufijo = "°C")
-                Campo("Temp. máxima", tMax, { tMax = it }, Modifier.weight(1f), numerico = true, sufijo = "°C")
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Campo("Vel. mínima", vMin, { vMin = it }, Modifier.weight(1f), numerico = true, sufijo = "m/min")
-                Campo("Vel. máxima", vMax, { vMax = it }, Modifier.weight(1f), numerico = true, sufijo = "m/min")
-            }
-        }
         error?.let { Etiqueta(it, 2) }
         BotonGrande("Guardar configuración", {
             val lista = filas.map { f -> Seccion(f[0].trim(), Fmt.leer(f[1]) ?: 0.0, f[2] == "true", f[3].trim()) }
@@ -129,7 +113,7 @@ fun ContenidoConfiguracion(
                         absIni = ini, absFin = fin, secciones = lista, turnosPorDia = turnosDia,
                         horaInicioDia = hDia.ifBlank { "06:00" }, horaInicioNoche = hNoche.ifBlank { "18:00" },
                         turnosParaEta = (nEta.toIntOrNull() ?: 6).coerceIn(1, 60),
-                        tempMin = Fmt.leer(tMin), tempMax = Fmt.leer(tMax), velMin = Fmt.leer(vMin), velMax = Fmt.leer(vMax)
+                        tempMin = p.tempMin, tempMax = p.tempMax, velMin = p.velMin, velMax = p.velMax
                     ))
                 }
             }
