@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sección de túnel con la geomembrana (amarillo) sobre la bóveda -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF" android:pathData="M28,80 V54 A26,26 0 0 1 80,54 V80 Z" />
+    <path android:fillColor="#F2B705" android:pathData="M32,80 V55 A22,22 0 0 1 76,55 V80 Z" />
+    <path android:fillColor="#002F5C" android:pathData="M37,80 V56 A17,17 0 0 1 71,56 V80 Z" />
+    <path android:fillColor="#A0BEE7" android:pathData="M24,80 H84 V86 H24 Z" />
+</vector>
