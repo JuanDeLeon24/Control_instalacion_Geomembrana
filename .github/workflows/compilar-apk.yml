@@ -14,24 +14,29 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
+      - name: Pruebas de cálculos
+        run: gradle testDebugUnitTest --no-daemon
+      - name: Verificar que el código compila
+        run: gradle assembleDebug --no-daemon --stacktrace
       - name: Preparar llave de firma del proyecto
         env:
           FIRMA_JKS_BASE64: ${{ secrets.FIRMA_JKS_BASE64 }}
           FIRMA_CLAVE: ${{ secrets.FIRMA_CLAVE }}
         run: |
           if [ -z "$FIRMA_JKS_BASE64" ] || [ -z "$FIRMA_CLAVE" ]; then
-            echo "::error::Faltan los secretos FIRMA_JKS_BASE64 y/o FIRMA_CLAVE (Settings > Secrets and variables > Actions). Sin la llave fija del proyecto el APK no se podría instalar encima de la versión anterior y se perderían los datos. Ver README."
-            exit 1
+            echo "HAY_FIRMA=false" >> "$GITHUB_ENV"
+          else
+            echo "$FIRMA_JKS_BASE64" | base64 -d > "$RUNNER_TEMP/firma.jks"
+            echo "FIRMA_ARCHIVO=$RUNNER_TEMP/firma.jks" >> "$GITHUB_ENV"
+            echo "HAY_FIRMA=true" >> "$GITHUB_ENV"
           fi
-          echo "$FIRMA_JKS_BASE64" | base64 -d > "$RUNNER_TEMP/firma.jks"
-          echo "FIRMA_ARCHIVO=$RUNNER_TEMP/firma.jks" >> "$GITHUB_ENV"
-      - name: Pruebas de cálculos
-        run: gradle testDebugUnitTest --no-daemon
-      - name: Compilar
+      - name: Compilar APK firmado
+        if: env.HAY_FIRMA == 'true'
         env:
           FIRMA_CLAVE: ${{ secrets.FIRMA_CLAVE }}
         run: gradle assembleRelease --no-daemon --stacktrace
       - name: Verificar firma del APK
+        if: env.HAY_FIRMA == 'true'
         run: |
           APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
           for f in app/build/outputs/apk/release/*.apk; do
@@ -41,7 +46,13 @@ jobs:
             mv "$f" "app/build/outputs/apk/release/ControlGeomembrana-v1.1.$((GITHUB_RUN_NUMBER + 10)).apk"
           done
       - uses: actions/upload-artifact@v4
+        if: env.HAY_FIRMA == 'true'
         with:
           name: ControlGeomembrana-APK
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+      - name: Falta la llave de firma
+        if: env.HAY_FIRMA != 'true'
+        run: |
+          echo "::error::El código compila, pero faltan los secretos FIRMA_JKS_BASE64 y FIRMA_CLAVE (Settings > Secrets and variables > Actions). Sin la llave fija del proyecto el APK no se podría instalar encima de la versión anterior y se perderían los datos. Ver README."
+          exit 1
