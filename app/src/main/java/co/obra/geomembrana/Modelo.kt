@@ -75,7 +75,8 @@ data class Registro(
     val perimetro: Double?,         // desarrollo transversal instalado (m)
     val areaManual: Double?,        // cantidad oficial en m² si difiere de longitud × perímetro (redondeos)
     val rollos: List<String>,       // códigos de rollos (opcional, versión anterior)
-    val numRollos: Int?,            // cantidad de rollos usados (unidades)
+    val numRollos: Double?,         // cantidad de rollos usados (unidades; puede ser fracción si es estimada)
+    val rollosEstimados: Boolean,   // true = la cantidad de rollos es estimada, no contada
     val tempCuna: Double?,          // °C
     val velSoldadura: Double?,      // m/min
     val prueba: Prueba,

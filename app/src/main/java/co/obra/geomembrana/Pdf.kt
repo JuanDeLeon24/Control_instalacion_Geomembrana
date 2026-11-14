@@ -293,7 +293,7 @@ object Pdf {
                 Fmt.fijo(r.area) + if (r.areaManual != null) "°" else "",
                 if (r.horaIni.isNotBlank() || r.horaFin.isNotBlank()) "${r.horaIni}–${r.horaFin}" else "",
                 Fmt.num(hrs), Fmt.num(hrs?.let { r.longitud / it }), Fmt.num(if (hrs != null && r.area != null) r.area!! / hrs else null, 1),
-                r.numRollos?.toString() ?: "", r.turno
+                (r.numRollos?.let { Fmt.num(it, 2) } ?: "") + if (r.rollosEstimados && r.numRollos != null) "†" else "", r.turno
             )
             val hFila = 15f
             h.espacio(hFila)
@@ -312,14 +312,15 @@ object Pdf {
         celda(h.c, M, h.y, wEt, 17f, "TOTAL  (${regs.size} ${if (regs.size == 1) "registro" else "registros"})", tot, fondo = CLARO)
         var x = M + wEt
         val totales = listOf(Fmt.fijo(rend.longitud), "", Fmt.fijo(rend.area), "", Fmt.num(rend.minutos / 60.0),
-            Fmt.num(rend.mPorHora), Fmt.num(rend.m2PorHora, 1), if (rend.rollos > 0) rend.rollos.toString() else "")
+            Fmt.num(rend.mPorHora), Fmt.num(rend.m2PorHora, 1), if (rend.rollos > 0) Fmt.num(rend.rollos, 2) + if (rend.rollosEstimados) "†" else "" else "")
         totales.forEachIndexed { i, t -> celda(h.c, x, h.y, ws[4 + i], 17f, t, tot, CENTRO, fondo = CLARO); x += ws[4 + i] }
         celda(h.c, x, h.y, ancho - (x - M), 17f, "", tot, fondo = CLARO)
         h.y += 17f
         h.alCambiar = null
         val notasTabla = listOfNotNull(
             if (regs.any { it.longitudManual != null }) "* Longitud ajustada a mano." else null,
-            if (regs.any { it.areaManual != null }) "° Cantidad oficial en m² (difiere de longitud × perímetro por redondeo)." else null
+            if (regs.any { it.areaManual != null }) "° Cantidad oficial en m² (difiere de longitud × perímetro por redondeo)." else null,
+            if (regs.any { it.rollosEstimados && it.numRollos != null }) "† Cantidad de rollos ESTIMADA (no contada)." else null
         )
         if (notasTabla.isNotEmpty()) {
             h.espacio(12f)
@@ -493,7 +494,7 @@ object Pdf {
                 h.y += 4f
                 val r = g.total
                 kpis(h, listOf(
-                    Triple(g.nombre, "${Fmt.fijo(r.longitud)} m", "${r.registros} registro(s)" + if (r.rollos > 0) " · ${r.rollos} rollos" else ""),
+                    Triple(g.nombre, "${Fmt.fijo(r.longitud)} m", "${r.registros} registro(s)" + if (r.rollos > 0) " · " + Fmt.rollos(r.rollos, r.rollosEstimados) else ""),
                     Triple("Área cubierta", "${Fmt.fijo(r.area)} m²", "longitud × perímetro"),
                     Triple("Horas trabajadas", if (r.minutos > 0) Fmt.duracion(r.minutos.toDouble()) else "–", ""),
                     Triple("Rendimiento", if (r.mPorHora != null) "${Fmt.num(r.mPorHora)} m/h" else "–",
@@ -528,7 +529,7 @@ object Pdf {
                     val m = Calc.metricas(x.registros, p).associateBy { it.nombre }
                     listOf(T.fechaCorta(x.fecha)) + nombres.flatMap { n ->
                         listOf(m[n]?.let { Fmt.fijo(it.total.longitud) } ?: "", m[n]?.let { Fmt.fijo(it.total.area) } ?: "")
-                    } + listOf(Fmt.fijo(x.rend.area), x.rend.rollos.takeIf { it > 0 }?.toString() ?: "")
+                    } + listOf(Fmt.fijo(x.rend.area), x.rend.rollos.takeIf { it > 0 }?.let { Fmt.num(it, 2) + if (x.rend.rollosEstimados) "†" else "" } ?: "")
                 })
             val cuad = Calc.porCuadrilla(acumulado).filter { it.nombre != "Sin asignar" }
             if (cuad.isNotEmpty()) {

@@ -19,7 +19,7 @@ class CalculosTest {
         rollos: List<String> = emptyList(), cuadrilla: String = "", temp: Double? = null, vel: Double? = null,
         prueba: Prueba = Prueba.APROBADO, geo: Geotextil = Geotextil.OK, id: String = "$fecha-$turno-$ini",
         seccion: String = "Bóveda", areaManual: Double? = null
-    ) = Registro(id, fecha, turno, seccion, "Residente", cuadrilla, ini, fin, hi, hf, manual, perim, areaManual, rollos, null, temp, vel,
+    ) = Registro(id, fecha, turno, seccion, "Residente", cuadrilla, ini, fin, hi, hf, manual, perim, areaManual, rollos, null, false, temp, vel,
         prueba, geo, "", id)
 
     @Test fun abscisas() {
@@ -222,7 +222,8 @@ class AvanceRealTest {
         // Rendimiento por hora con los horarios reales
         val r = Calc.rendimiento(bov)
         assertTrue(r.mPorHora!! > 0)
-        assertEquals(776, r.rollos)
+        assertEquals(220.30, r.rollos, 1e-9)               // rollos de bóveda: estimados
+        assertTrue(r.rollosEstimados)
         val c = Calc.curvaS(res.registros, p.secciones[2], p)
         assertEquals(LocalDate.of(2026, 8, 13), c.real.first().fecha)
         assertEquals(0.0, c.real.first().metros, 1e-9)
@@ -246,22 +247,29 @@ class AvanceRealTest {
         val n = bov.first { it.fecha == "2026-09-25" && it.turno == Turnos.NOCHE }
         assertEquals("18:30", n.horaIni); assertEquals("04:15", n.horaFin)
         assertEquals(585, n.minutos)                       // cruza la medianoche
-        assertEquals(34, n.numRollos)
-        assertEquals(131, Calc.deSeccion(res.registros, "Bota HD").sumOf { it.numRollos ?: 0 })
-        assertEquals(124, Calc.deSeccion(res.registros, "Bota HI").sumOf { it.numRollos ?: 0 })
+        assertEquals(4.33, n.numRollos!!, 1e-9)
+        assertTrue(bov.all { it.rollosEstimados })
+        assertEquals(131.0, Calc.deSeccion(res.registros, "Bota HD").sumOf { it.numRollos ?: 0.0 }, 1e-9)
+        assertEquals(124.0, Calc.deSeccion(res.registros, "Bota HI").sumOf { it.numRollos ?: 0.0 }, 1e-9)
+        assertTrue(Calc.deSeccion(res.registros, "Bota HD").none { it.rollosEstimados })
+        assertFalse(Calc.rendimiento(Calc.deSeccion(res.registros, "Bota HI")).rollosEstimados)
         val m = Calc.metricas(res.registros.filter { it.fecha == "2026-09-25" }, p)
-        assertEquals(54, m[0].total.rollos)
+        assertEquals(2.17 + 4.33, m[0].total.rollos, 1e-9)
+        assertTrue(m[0].total.rollosEstimados)
+        assertEquals("6,5 rollos (estimados)", Fmt.rollos(m[0].total.rollos, true))
+        assertEquals("9 rollos", Fmt.rollos(9.0, false))
         assertEquals(19.5, m[0].total.longitud, 1e-9)
     }
 
     @Test fun fusionActualizaSinDuplicar() {
         // Datos como los tenía el teléfono antes (sin jornada, horas ni rollos) + uno ingresado a mano
-        val viejos = res.registros.map { it.copy(id = "v-" + it.creado, turno = Turnos.DIA, horaIni = "", horaFin = "", numRollos = null, notas = "nota") }
+        val viejos = res.registros.map { it.copy(id = "v-" + it.creado, turno = Turnos.DIA, horaIni = "", horaFin = "", numRollos = null, rollosEstimados = false, notas = "nota") }
         val manual = res.registros.first().copy(id = "manual", fecha = "2026-11-13", absIni = 6512.39, absFin = 6507.0, seccion = "Bóveda")
         val f = Importacion.fusionar(viejos + manual, res.registros)
         assertTrue(f.nuevos.isEmpty())
         assertEquals(100, f.actualizados.size)
         assertTrue(f.actualizados.all { it.id.startsWith("v-") && it.notas == "nota" && it.numRollos != null && it.horaIni.isNotEmpty() })
+        assertTrue(f.actualizados.filter { it.seccion == "Bóveda" }.all { it.rollosEstimados })
         // Aplicarlo dos veces no cambia nada más
         assertEquals(100, Importacion.fusionar(f.actualizados, res.registros).iguales)
     }

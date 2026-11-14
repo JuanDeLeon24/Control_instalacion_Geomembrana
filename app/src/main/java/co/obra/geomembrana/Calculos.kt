@@ -43,6 +43,13 @@ object Abscisa {
 // ======================= Formato de números =======================
 
 object Fmt {
+    /** "2,33 rollos (estimados)" / "9 rollos"; vacío si no hay dato. */
+    fun rollos(n: Double?, estimados: Boolean, conPalabra: Boolean = true): String {
+        if (n == null || n <= 0.0) return ""
+        val v = num(n, 2) + if (conPalabra) (if (n == 1.0) " rollo" else " rollos") else ""
+        return v + if (estimados) " (estimado${if (conPalabra && n != 1.0) "s" else ""})" else ""
+    }
+
     val ES: Locale = Locale("es", "CO")
 
     fun num(d: Double?, dec: Int = 2): String {
@@ -99,7 +106,8 @@ data class Rendimiento(
     val longitud: Double,            // m (suma de longitudes de los registros)
     val area: Double,                // m² (solo registros con perímetro)
     val minutos: Int,                // minutos trabajados (solo registros con horas)
-    val rollos: Int,                 // rollos usados (unidades)
+    val rollos: Double,              // rollos usados (unidades)
+    val rollosEstimados: Boolean,    // algún registro tiene la cantidad de rollos estimada
     val mPorHora: Double?,
     val m2PorHora: Double?
 )
@@ -310,7 +318,8 @@ object Calc {
             longitud = registros.sumOf { it.longitud },
             area = registros.sumOf { it.area ?: 0.0 },
             minutos = min,
-            rollos = registros.sumOf { it.numRollos ?: 0 },
+            rollos = registros.sumOf { it.numRollos ?: 0.0 },
+            rollosEstimados = registros.any { it.rollosEstimados && it.numRollos != null },
             mPorHora = if (horas > 0) conHoras.sumOf { it.longitud } / horas else null,
             m2PorHora = if (minArea > 0) conArea.sumOf { it.area ?: 0.0 } / (minArea / 60.0) else null
         )

@@ -10,14 +10,14 @@ import android.database.sqlite.SQLiteOpenHelper
 data class Foto(val jornada: String, val momento: Momento, val archivo: String, val tomada: String)
 
 /** Base de datos SQLite dentro del teléfono. Cada cambio se guarda al instante. */
-class Db(ctx: Context) : SQLiteOpenHelper(ctx, "geomembrana.db", null, 3) {
+class Db(ctx: Context) : SQLiteOpenHelper(ctx, "geomembrana.db", null, 4) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             "CREATE TABLE registros(" +
                 "id TEXT PRIMARY KEY, fecha TEXT NOT NULL, turno TEXT NOT NULL, seccion TEXT, responsable TEXT, cuadrilla TEXT, " +
                 "abs_ini REAL NOT NULL, abs_fin REAL NOT NULL, hora_ini TEXT, hora_fin TEXT, " +
-                "longitud_manual REAL, perimetro REAL, area_manual REAL, rollos TEXT, num_rollos INTEGER, temp_cuna REAL, vel_soldadura REAL, " +
+                "longitud_manual REAL, perimetro REAL, area_manual REAL, rollos TEXT, num_rollos REAL, rollos_estimados INTEGER, temp_cuna REAL, vel_soldadura REAL, " +
                 "prueba TEXT, geotextil TEXT, notas TEXT, creado TEXT)"
         )
         db.execSQL("CREATE INDEX idx_registros_fecha ON registros(fecha)")
@@ -48,6 +48,10 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "geomembrana.db", null, 3) {
             // v2 -> v3: cantidad de rollos (unidades)
             db.execSQL("ALTER TABLE registros ADD COLUMN num_rollos INTEGER")
         }
+        if (oldVersion < 4) {
+            // v3 -> v4: rollos estimados (la columna num_rollos ya admite decimales en SQLite)
+            db.execSQL("ALTER TABLE registros ADD COLUMN rollos_estimados INTEGER")
+        }
     }
 
     private fun Cursor.txt(c: String): String = getColumnIndex(c).let { if (it < 0 || isNull(it)) "" else getString(it) }
@@ -60,7 +64,8 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "geomembrana.db", null, 3) {
         horaIni = c.txt("hora_ini"), horaFin = c.txt("hora_fin"),
         longitudManual = c.dbl("longitud_manual"), perimetro = c.dbl("perimetro"), areaManual = c.dbl("area_manual"),
         rollos = c.txt("rollos").split("\n").map { it.trim() }.filter { it.isNotEmpty() },
-        numRollos = c.getColumnIndex("num_rollos").let { if (it < 0 || c.isNull(it)) null else c.getInt(it) },
+        numRollos = c.dbl("num_rollos"),
+        rollosEstimados = c.getColumnIndex("rollos_estimados").let { it >= 0 && !c.isNull(it) && c.getInt(it) == 1 },
         tempCuna = c.dbl("temp_cuna"), velSoldadura = c.dbl("vel_soldadura"),
         prueba = Prueba.de(c.txt("prueba")), geotextil = Geotextil.de(c.txt("geotextil")),
         notas = c.txt("notas"), creado = c.txt("creado")
@@ -82,7 +87,7 @@ class Db(ctx: Context) : SQLiteOpenHelper(ctx, "geomembrana.db", null, 3) {
         put("hora_ini", r.horaIni); put("hora_fin", r.horaFin)
         num("longitud_manual", r.longitudManual); num("perimetro", r.perimetro); num("area_manual", r.areaManual)
         put("rollos", r.rollos.joinToString("\n"))
-        if (r.numRollos != null) put("num_rollos", r.numRollos) else putNull("num_rollos")
+        num("num_rollos", r.numRollos); put("rollos_estimados", if (r.rollosEstimados) 1 else 0)
         num("temp_cuna", r.tempCuna); num("vel_soldadura", r.velSoldadura)
         put("prueba", r.prueba.name); put("geotextil", r.geotextil.name)
         put("notas", r.notas); put("creado", r.creado)

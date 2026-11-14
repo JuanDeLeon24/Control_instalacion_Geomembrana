@@ -8,7 +8,7 @@ import kotlin.math.abs
  * Lee un registro de avance en texto (CSV con ; o , o texto pegado de Excel con tabuladores).
  * Columnas reconocidas por su título (el orden no importa):
  *   Sección | Fecha | PK inicial | PK final | Longitud (m) | Cantidad (m²)   [obligatorias: Sección, Fecha, PK inicial, PK final]
- *   Jornada (o Turno) | Hora inicio | Hora fin | Rollos (und) | Responsable | Cuadrilla | Notas   [opcionales]
+ *   Jornada (o Turno) | Hora inicio | Hora fin | Rollos (und) | Rollos estimados (Sí/No) | Responsable | Cuadrilla | Notas
  * No depende de Android (se prueba en la JVM).
  */
 object Importacion {
@@ -95,7 +95,8 @@ object Importacion {
         val cHFin = columna(titulos, "hora fin", "hora de fin", "hora final", "fin")
         val cResp = columna(titulos, "responsable")
         val cCuad = columna(titulos, "cuadrilla")
-        val cRollos = columna(titulos, "rollo")
+        val cEstim = columna(titulos, "rollos estimados", "estimado")
+        val cRollos = titulos.indexOfFirst { it.startsWith("rollo") && !it.startsWith("rollos estim") }
         val cNotas = columna(titulos, "nota", "observ")
         val faltan = listOf("Sección" to cSec, "Fecha" to cFecha, "PK inicial" to cIni, "PK final" to cFin).filter { it.second < 0 }
         if (faltan.isNotEmpty()) return Resultado(emptyList(), emptyList(),
@@ -138,7 +139,8 @@ object Importacion {
                 absIni = ini, absFin = fin, horaIni = hora(col(f, cHIni)), horaFin = hora(col(f, cHFin)),
                 longitudManual = longManual, perimetro = perim, areaManual = areaManual,
                 rollos = col(f, cRollos).takeIf { Fmt.leer(it) == null }?.split(',', '/')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList(),
-                numRollos = Fmt.leer(col(f, cRollos))?.let { Math.round(it).toInt() },
+                numRollos = Fmt.leer(col(f, cRollos)),
+                rollosEstimados = Texto.clave(col(f, cEstim)).let { it.startsWith("si") || it == "x" || it.startsWith("estim") },
                 tempCuna = null, velSoldadura = null, prueba = Prueba.NA, geotextil = Geotextil.OK,
                 notas = col(f, cNotas), creado = "importado-%05d".format(n)
             )
@@ -163,6 +165,7 @@ object Importacion {
                 turno = n.turno,
                 horaIni = n.horaIni.ifBlank { e.horaIni }, horaFin = n.horaFin.ifBlank { e.horaFin },
                 numRollos = n.numRollos ?: e.numRollos,
+                rollosEstimados = if (n.numRollos != null) n.rollosEstimados else e.rollosEstimados,
                 rollos = n.rollos.ifEmpty { e.rollos },
                 longitudManual = n.longitudManual, areaManual = n.areaManual, perimetro = n.perimetro ?: e.perimetro,
                 responsable = n.responsable.ifBlank { e.responsable }, cuadrilla = n.cuadrilla.ifBlank { e.cuadrilla },

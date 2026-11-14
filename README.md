@@ -17,7 +17,8 @@ geomembrana que avanzan por separado:
 Todo se puede cambiar en Configuración (nombre, perímetro, grupo y "terminada" de cada sección).
 
 **Avance ya ejecutado incluido**: la app trae 100 registros de bota y bóveda del 23/07/2026 al 14/10/2026, con jornada
-(día / noche), hora de inicio y fin y rollos usados (la jornada de bóveda del 13/11/2026, K6+512.39 → K6+507.00, se dejó
+(día / noche), hora de inicio y fin y rollos usados; en las 56 jornadas de bóveda la cantidad de rollos es **estimada**
+(con decimales) y así se marca en la app y en los informes (la jornada de bóveda del 13/11/2026, K6+512.39 → K6+507.00, se dejó
 por fuera para ingresarla a mano como prueba). Si el teléfono ya tenía cargada una versión anterior de esos datos, al
 abrir la versión nueva se **completan** los registros existentes (sin duplicarlos ni tocar lo ingresado a mano)
 (`app/src/main/assets/avance_inicial.csv`) y los carga sola la primera vez que se abre. Las cantidades en m² son las
@@ -66,7 +67,7 @@ Una pregunta por pantalla, con botones grandes **Atrás / Siguiente**. Los núme
    que se avanzó. Muestra en grande el **área cubierta** (longitud × perímetro). Avisa si se cruza con otro registro o se
    sale del túnel. En "Ajustes avanzados": perímetro, corregir longitud (traslapo) y cantidad oficial del acta.
 3. **Horario y personal**: hora de inicio y fin con botón **Ahora** (calcula tiempo y rendimiento), responsable,
-   cuadrilla y **cantidad de rollos** (botones – y +).
+   cuadrilla y **cantidad de rollos** (botones – y +; admite decimales) con la opción "Es una cantidad estimada".
 4. **Fotos del día**: 4 cuadros (inicio, dos intermedias y final). También se cargan después desde Inicio.
 5. **Revisar y guardar**: resumen con botones "Cambiar", observaciones y **Guardar**.
 
@@ -97,7 +98,8 @@ Cada archivo se puede **abrir, compartir** (WhatsApp, correo) o **guardar** en e
 
 ### Importar avance
 Más → "Importar avance desde archivo". Primera fila con títulos: `Sección | Fecha | PK inicial | PK final | Longitud (m) |
-Cantidad (m²)` (opcionales: Jornada, Hora inicio, Hora fin, Rollos (und), Responsable, Cuadrilla, Notas). Separado por `;`, `,` o tabulador. Fechas
+Cantidad (m²)` (opcionales: Jornada, Hora inicio, Hora fin, Rollos (und), Rollos estimados (Sí/No), Responsable,
+Cuadrilla, Notas). Separado por `;`, `,` o tabulador. Fechas
 `2026-07-23`, `23/07/2026` o `7/23/2026` (se detecta el formato). Si un registro ya existe (misma sección, fecha y abscisas) lo **actualiza** en vez de repetirlo.
 Muestra un resumen (nuevos, para actualizar, sin cambios) antes de importar.
 

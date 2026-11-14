@@ -90,11 +90,11 @@ object Excel {
         // ---------- Registros ----------
         val porDia = fotos.groupBy { it.jornada }
         val reg = Hoja("Registros", listOf(11.0, 8.0, 12.0, 18.0, 16.0, 12.0, 12.0, 11.0, 11.0, 11.0, 11.0, 12.0, 9.0, 9.0, 9.0, 9.0, 10.0,
-            22.0, 36.0))
+            12.0, 36.0, 11.0))
         reg.congelar = 1
         reg.fila(listOf("Fecha", "Turno", "Sección", "Responsable", "Cuadrilla", "PK inicial", "PK final", "Abs. inicial (m)",
             "Abs. final (m)", "Longitud (m)", "Perímetro (m)", "Cantidad (m²)", "Hora inicio", "Hora fin", "Horas", "m/h", "m²/h",
-            "Rollos (und)", "Notas").map { c(it, ENC) }, 32.0)
+            "Rollos (und)", "Notas", "Rollos estimados").map { c(it, ENC) }, 32.0)
         regs.forEach { r ->
             val f = reg.siguiente
             val h = r.minutos?.takeIf { it > 0 }?.let { it / 60.0 }
@@ -109,7 +109,7 @@ object Excel {
                 },
                 hora(r.horaIni), hora(r.horaFin), d(h),
                 d(h?.let { r.longitud / it }), d(if (h != null && area != null) area / h else null),
-                c(r.numRollos?.toDouble(), NUM), c(r.notas, TEXTO)))
+                d(r.numRollos), c(r.notas, TEXTO), c(if (r.numRollos == null) "" else if (r.rollosEstimados) "Sí" else "No", CENTRO)))
         }
         val ult = reg.filas.size
         if (regs.isNotEmpty()) {
@@ -117,10 +117,10 @@ object Excel {
                 listOf(c(Formula("SUM(J2:J$ult)", rend.longitud), TOT_NUM), c(null, TOT_NUM),
                     c(Formula("SUM(L2:L$ult)", rend.area), TOT_NUM), c(null, TOT_NUM), c(null, TOT_NUM),
                     c(Formula("SUM(O2:O$ult)", rend.minutos / 60.0), TOT_NUM), c(null, TOT_NUM), c(null, TOT_NUM),
-                    c(Formula("SUM(R2:R$ult)", rend.rollos.toDouble()), TOT_NUM)))
+                    c(Formula("SUM(R2:R$ult)", Math.round(rend.rollos * 100) / 100.0), TOT_NUM)))
             reg.combinadas += "A${reg.filas.size}:I${reg.filas.size}"
         }
-        reg.filtro = "A1:S${maxOf(2, ult)}"
+        reg.filtro = "A1:T${maxOf(2, ult)}"
 
         // ---------- Por fecha, separado por grupo ----------
         val nombres = grupos.map { it.nombre }
@@ -132,7 +132,7 @@ object Excel {
             val m = Calc.metricas(x.registros, p).associateBy { it.nombre }
             pf.fila(listOf(c(T.serialExcel(x.fecha), FECHA)) +
                 nombres.flatMap { n -> listOf(d(m[n]?.total?.longitud), d(m[n]?.total?.area)) } +
-                listOf(d(x.rend.area, DEC2), c(x.rend.rollos.toDouble(), NUM), c("${porDia[x.fecha]?.size ?: 0}/4", CENTRO)))
+                listOf(d(x.rend.area, DEC2), d(x.rend.rollos), c("${porDia[x.fecha]?.size ?: 0}/4", CENTRO)))
         }
 
         // ---------- Curva S (secciones en curso) ----------

@@ -126,7 +126,8 @@ fun PantallaFormulario(
     }
     var ajustarArea by rememberSaveable(registroId) { mutableStateOf(original?.areaManual != null) }
     var areaManual by rememberSaveable(registroId) { mutableStateOf(txt(original?.areaManual, 2)) }
-    var numRollos by rememberSaveable(registroId) { mutableStateOf(original?.numRollos?.toString() ?: "") }
+    var numRollos by rememberSaveable(registroId) { mutableStateOf(txt(original?.numRollos, 2)) }
+    var rollosEstimados by rememberSaveable(registroId) { mutableStateOf(original?.rollosEstimados ?: false) }
     var notas by rememberSaveable(registroId) { mutableStateOf(original?.notas ?: "") }
     var intento by rememberSaveable(registroId) { mutableStateOf(false) }
     var confirmarBorrar by remember { mutableStateOf(false) }
@@ -156,7 +157,8 @@ fun PantallaFormulario(
             absIni = ini, absFin = fin, horaIni = horaIni, horaFin = horaFin,
             longitudManual = if (ajustar) Fmt.leer(longManual) else null, perimetro = perim,
             areaManual = if (ajustarArea) Fmt.leer(areaManual) else null,
-            rollos = original?.rollos ?: emptyList(), numRollos = numRollos.toIntOrNull(),
+            rollos = original?.rollos ?: emptyList(), numRollos = Fmt.leer(numRollos)?.takeIf { it > 0 },
+            rollosEstimados = rollosEstimados && Fmt.leer(numRollos) != null,
             // Control de calidad retirado de la app: se conservan los valores que ya tuviera el registro
             tempCuna = original?.tempCuna, velSoldadura = original?.velSoldadura,
             prueba = original?.prueba ?: Prueba.NA, geotextil = original?.geotextil ?: Geotextil.OK,
@@ -357,12 +359,16 @@ fun PantallaFormulario(
                     Campo("Cuadrilla (opcional)", cuadrilla, { cuadrilla = it })
                     Pregunta("¿Cuántos rollos se usaron?")
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        val n = numRollos.toIntOrNull() ?: 0
-                        OutlinedButton(onClick = { numRollos = if (n <= 1) "" else (n - 1).toString() },
+                        val n = Fmt.leer(numRollos) ?: 0.0
+                        OutlinedButton(onClick = { numRollos = if (n <= 1.0) "" else txt(n - 1, 2) },
                             modifier = Modifier.size(64.dp)) { Text("–", fontSize = 28.sp) }
-                        Campo("Rollos", numRollos, { numRollos = it.filter { c -> c.isDigit() }.take(3) }, Modifier.weight(1f),
+                        Campo("Rollos", numRollos, { numRollos = it.filter { c -> c.isDigit() || c == ',' || c == '.' }.take(6) }, Modifier.weight(1f),
                             numerico = true, sufijo = "und")
-                        OutlinedButton(onClick = { numRollos = (n + 1).toString() }, modifier = Modifier.size(64.dp)) { Text("+", fontSize = 28.sp) }
+                        OutlinedButton(onClick = { numRollos = txt(n + 1, 2) }, modifier = Modifier.size(64.dp)) { Text("+", fontSize = 28.sp) }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Es una cantidad estimada (no contada)", fontSize = 15.sp, modifier = Modifier.weight(1f))
+                        Switch(checked = rollosEstimados, onCheckedChange = { rollosEstimados = it })
                     }
                 }
 
@@ -385,7 +391,7 @@ fun PantallaFormulario(
                             FilaResumen("Longitud × perímetro", "${Fmt.num(longitud)} m × ${Fmt.num(perim)} m") { paso = 1 }
                             FilaResumen("Horario", if (minutos != null) "$horaIni a $horaFin (${Fmt.duracion(minutos.toDouble())})" else "Sin horario") { paso = 2 }
                             FilaResumen("Responsable", responsable.ifBlank { "Sin nombre" }) { paso = 2 }
-                            FilaResumen("Rollos", numRollos.ifBlank { "Sin dato" } + if (numRollos.isNotBlank()) " und" else "") { paso = 2 }
+                            FilaResumen("Rollos", Fmt.rollos(Fmt.leer(numRollos), rollosEstimados).ifBlank { "Sin dato" }) { paso = 2 }
                             FilaResumen("Fotos del día", "${db.fotosDe(fecha).size} de 4") { paso = 3 }
                         }
                     }

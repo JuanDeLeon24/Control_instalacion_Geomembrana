@@ -78,7 +78,7 @@ object Ajustes {
      * Cuando una versión nueva de la app trae datos corregidos o completados, se sube [AVANCE_INICIAL] y al abrir
      * se actualizan los registros existentes (sin duplicar ni borrar nada de lo ingresado a mano).
      */
-    const val AVANCE_INICIAL = 2
+    const val AVANCE_INICIAL = 3
     fun avanceInicialAplicado(ctx: Context): Int =
         sp(ctx).getInt("avance_inicial_version", if (sp(ctx).getBoolean("avance_inicial", false)) 1 else 0)
     fun marcarAvanceInicial(ctx: Context) { sp(ctx).edit().putInt("avance_inicial_version", AVANCE_INICIAL).apply() }
