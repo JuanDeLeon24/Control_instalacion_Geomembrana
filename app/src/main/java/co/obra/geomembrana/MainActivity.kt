@@ -143,6 +143,8 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
             Ajustes.marcarAvanceInicial(ctx)
             if (n > 0) { version++; aviso("Se cargaron $n registros de avance ya ejecutados") }
         }
+        // Copia automática del día en Descargas/ControlGeomembrana (sobrevive a una desinstalación)
+        withContext(Dispatchers.IO) { runCatching { Autocopia.siToca(ctx, db) } }
     }
 
     fun generar(etiqueta: String, mime: String, trabajo: () -> File) {
@@ -213,6 +215,8 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
             db = db, p = proyecto, registros = registros, original = original, registroId = id,
             alGuardar = { r ->
                 db.guardar(r); Ajustes.recordar(ctx, r); version++; ruta = "inicio"
+                // Actualiza la copia del día en Descargas con lo recién guardado
+                scope.launch(Dispatchers.IO) { runCatching { Autocopia.hacer(ctx, db) } }
                 aviso("Registro guardado: ${r.seccion} ${Fmt.num(r.longitud)} m · ${Fmt.num(r.area, 2)} m²")
             },
             alEliminar = { db.eliminar(id); version++; ruta = "inicio"; aviso("Registro eliminado") },
@@ -248,6 +252,15 @@ fun App(db: Db, tema: ModoTema, alCambiarTema: (ModoTema) -> Unit) {
                         HorizontalDivider()
                         DropdownMenuItem(text = { Text("Guardar copia de seguridad") }, onClick = {
                             menu = false; exportarCopia.launch("Geomembrana_copia_${T.hoy()}.zip")
+                        })
+                        DropdownMenuItem(text = { Text("Copia ahora en Descargas") }, onClick = {
+                            menu = false
+                            trabajando = "Guardando copia en Descargas…"
+                            scope.launch {
+                                val r = runCatching { withContext(Dispatchers.IO) { Autocopia.hacer(ctx, db) } }
+                                trabajando = null
+                                aviso(if (r.isSuccess) "Copia guardada en Descargas/ControlGeomembrana" else "No se pudo guardar la copia")
+                            }
                         })
                         DropdownMenuItem(text = { Text("Restaurar copia de seguridad") }, onClick = { menu = false; confirmarRestaurar = true })
                         HorizontalDivider()

@@ -16,7 +16,8 @@ geomembrana que avanzan por separado:
 
 Todo se puede cambiar en Configuración (nombre, perímetro, grupo y "terminada" de cada sección).
 
-**Avance ya ejecutado incluido**: la app trae los 101 registros de bota y bóveda del 23/07/2026 al 13/11/2026
+**Avance ya ejecutado incluido**: la app trae 100 registros de bota y bóveda del 23/07/2026 al 14/10/2026 (la jornada de
+bóveda del 13/11/2026, K6+512.39 → K6+507.00, se dejó por fuera para ingresarla a mano como prueba)
 (`app/src/main/assets/avance_inicial.csv`) y los carga sola la primera vez que se abre. Las cantidades en m² son las
 oficiales del registro, aunque difieran unas centésimas de longitud × perímetro.
 
@@ -26,28 +27,29 @@ oficiales del registro, aunque difieran unas centésimas de longitud × perímet
 2. Abre la ejecución terminada y descarga **ControlGeomembrana-APK** (.zip; adentro está el .apk).
 3. Pasa el .apk al celular, ábrelo y acepta "Instalar apps de origen desconocido".
 
-### Firma (para poder actualizar sin perder datos)
-El repositorio es público, por eso **la llave de firma no está en el código**. Se guarda como secreto de GitHub:
-*Settings → Secrets and variables → Actions → New repository secret*:
+### Actualizaciones sin perder datos
+Cada APK nuevo se instala **encima** del anterior y conserva registros, fotos y configuración, porque:
 
-| Secreto | Contenido |
-|---|---|
-| `FIRMA_JKS_BASE64` | El archivo de llave (.jks) convertido a base64 |
-| `FIRMA_CLAVE` | La contraseña de la llave |
+1. **Todas las versiones se firman con la misma llave del proyecto.** La llave no está en el repositorio (es público):
+   se guarda en dos secretos de GitHub, *Settings → Secrets and variables → Actions → New repository secret*:
 
-La llave se crea una sola vez (en un computador con Java):
+   | Secreto | Contenido |
+   |---|---|
+   | `FIRMA_JKS_BASE64` | La llave (.jks) en base64 |
+   | `FIRMA_CLAVE` | La contraseña de la llave |
 
-```bash
-keytool -genkeypair -v -keystore geomembrana.jks -alias geomembrana -keyalg RSA -keysize 2048 -validity 10000
-```
+   Si faltan, la compilación **se detiene con un error** en vez de producir un APK que obligaría a desinstalar. Después
+   de compilar, el flujo verifica que el APK quedó firmado con la llave del proyecto (huella SHA-256
+   `26:BB:97:78:73:4B:C6:8D:AC:3D:2D:0F:35:98:E1:E4:D8:E8:A7:21:E2:C6:89:B4:CA:5C:7C:A7:E2:5F:B5:61`).
+   Guarda una copia de la llave y su contraseña fuera de GitHub: sin ellas no se pueden publicar actualizaciones.
+2. **El número de versión sube en cada compilación** (`versionCode` = número de ejecución + 10; el APK se llama
+   `ControlGeomembrana-v1.1.N.apk`).
+3. **La base de datos se migra sin borrar nada**: los cambios de versión solo agregan tablas o columnas.
+4. **Copia automática diaria** (datos + fotos + configuración) en `Descargas/ControlGeomembrana/` del teléfono, que se
+   actualiza cada vez que se guarda un registro y conserva las últimas 10. Esa carpeta no se borra al desinstalar: si
+   algún día hubiera que reinstalar, menú ⋮ → "Restaurar copia de seguridad" y se elige el .zip más reciente.
 
-```bash
-base64 -w0 geomembrana.jks
-```
-
-Guarda el .jks y la contraseña en un lugar seguro: si se pierden, las versiones nuevas no se instalan encima de las
-anteriores. **Sin estos secretos** el APK se firma con una llave temporal distinta en cada compilación, y para instalar
-una versión nueva hay que desinstalar la anterior (haz antes una copia de seguridad).
+Para actualizar: descarga el APK nuevo, ábrelo y toca **Actualizar**. No desinstales la app.
 
 ## Uso
 

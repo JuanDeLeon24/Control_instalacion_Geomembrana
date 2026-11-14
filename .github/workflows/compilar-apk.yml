@@ -14,23 +14,32 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
-      - name: Preparar llave de firma (si está configurada)
+      - name: Preparar llave de firma del proyecto
         env:
           FIRMA_JKS_BASE64: ${{ secrets.FIRMA_JKS_BASE64 }}
+          FIRMA_CLAVE: ${{ secrets.FIRMA_CLAVE }}
         run: |
-          if [ -n "$FIRMA_JKS_BASE64" ]; then
-            echo "$FIRMA_JKS_BASE64" | base64 -d > "$RUNNER_TEMP/firma.jks"
-            echo "FIRMA_ARCHIVO=$RUNNER_TEMP/firma.jks" >> "$GITHUB_ENV"
-            echo "Se firmará con la llave del proyecto."
-          else
-            echo "::warning::No está el secreto FIRMA_JKS_BASE64: el APK se firma con una llave de depuración y no se podrá instalar encima de otra versión. Ver README."
+          if [ -z "$FIRMA_JKS_BASE64" ] || [ -z "$FIRMA_CLAVE" ]; then
+            echo "::error::Faltan los secretos FIRMA_JKS_BASE64 y/o FIRMA_CLAVE (Settings > Secrets and variables > Actions). Sin la llave fija del proyecto el APK no se podría instalar encima de la versión anterior y se perderían los datos. Ver README."
+            exit 1
           fi
+          echo "$FIRMA_JKS_BASE64" | base64 -d > "$RUNNER_TEMP/firma.jks"
+          echo "FIRMA_ARCHIVO=$RUNNER_TEMP/firma.jks" >> "$GITHUB_ENV"
       - name: Pruebas de cálculos
         run: gradle testDebugUnitTest --no-daemon
       - name: Compilar
         env:
           FIRMA_CLAVE: ${{ secrets.FIRMA_CLAVE }}
         run: gradle assembleRelease --no-daemon --stacktrace
+      - name: Verificar firma del APK
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          for f in app/build/outputs/apk/release/*.apk; do
+            "$APKSIGNER" verify --print-certs "$f" | tee firma.txt
+            grep -q "SHA-256 digest: 26bb9778734bc68dac3d2d0f3598e1e4d8e8a721e2c689b4ca5c7ca7e25fb561" firma.txt \
+              || { echo "::error::El APK no quedó firmado con la llave del proyecto"; exit 1; }
+            mv "$f" "app/build/outputs/apk/release/ControlGeomembrana-v1.1.$((GITHUB_RUN_NUMBER + 10)).apk"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: ControlGeomembrana-APK

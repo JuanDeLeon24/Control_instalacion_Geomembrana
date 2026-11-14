@@ -4,8 +4,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// La llave de firma NO está en el repositorio. En GitHub Actions llega desde los secretos
-// FIRMA_JKS_BASE64 y FIRMA_CLAVE (ver README). Sin ellos se firma con la llave de depuración.
+// La llave de firma NO está en el repositorio (es público). En GitHub Actions llega desde los secretos
+// FIRMA_JKS_BASE64 y FIRMA_CLAVE (ver README). Todas las versiones deben firmarse con la MISMA llave:
+// así cada APK nuevo se instala encima del anterior y conserva los datos.
+// Sin la llave (compilación local) se usa la de depuración: sirve para probar, no para distribuir.
 val firmaArchivo: String? = System.getenv("FIRMA_ARCHIVO")
 val firmaClave: String? = System.getenv("FIRMA_CLAVE")
 val conFirma = !firmaArchivo.isNullOrBlank() && !firmaClave.isNullOrBlank() && file(firmaArchivo!!).exists()
@@ -18,8 +20,10 @@ android {
         applicationId = "co.obra.geomembrana"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // Cada compilación en GitHub sube el número de versión (Android no instala una versión menor encima de una mayor)
+        val numero = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0) + 10
+        versionCode = numero
+        versionName = "1.1.$numero"
     }
 
     signingConfigs {

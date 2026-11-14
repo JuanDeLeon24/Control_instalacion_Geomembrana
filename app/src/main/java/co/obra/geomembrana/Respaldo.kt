@@ -106,3 +106,68 @@ object Respaldo {
         return regs.size
     }
 }
+
+/**
+ * Copia automática diaria (datos + fotos) en Descargas/ControlGeomembrana del teléfono.
+ * Esa carpeta NO se borra al desinstalar la app: si algún día hubiera que reinstalar, se recupera todo con
+ * "Restaurar copia de seguridad". Se guardan las últimas [MAXIMO] copias.
+ */
+object Autocopia {
+    private const val CARPETA = "ControlGeomembrana"
+    private const val PREFIJO = "Geomembrana_auto_"
+    private const val MAXIMO = 10
+
+    private fun sp(ctx: Context) = ctx.getSharedPreferences("ajustes", Context.MODE_PRIVATE)
+    fun ultima(ctx: Context): String = sp(ctx).getString("autocopia", "") ?: ""
+
+    /** Hace la copia si hoy aún no se ha hecho. Devuelve true si la hizo. */
+    fun siToca(ctx: Context, db: Db): Boolean {
+        val hoy = T.hoy()
+        if (ultima(ctx) == hoy || db.registros().isEmpty()) return false
+        hacer(ctx, db)
+        sp(ctx).edit().putString("autocopia", hoy).apply()
+        return true
+    }
+
+    fun hacer(ctx: Context, db: Db) {
+        val nombre = "$PREFIJO${T.hoy()}.zip"
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val r = ctx.contentResolver
+            val col = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val ruta = android.os.Environment.DIRECTORY_DOWNLOADS + "/" + CARPETA + "/"
+            // Si ya hay una copia de hoy (de esta instalación), se reemplaza
+            r.delete(col, "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${android.provider.MediaStore.MediaColumns.RELATIVE_PATH} = ?",
+                arrayOf(nombre, ruta))
+            val v = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, nombre)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+                put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, ruta)
+                put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val uri = r.insert(col, v) ?: return
+            try {
+                r.openOutputStream(uri)!!.use { Respaldo.exportar(ctx, db, it) }
+                v.clear(); v.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                r.update(uri, v, null, null)
+            } catch (e: Exception) {
+                r.delete(uri, null, null); throw e
+            }
+            // Conserva solo las últimas copias automáticas
+            val viejas = mutableListOf<android.net.Uri>()
+            r.query(col, arrayOf(android.provider.MediaStore.MediaColumns._ID, android.provider.MediaStore.MediaColumns.DISPLAY_NAME),
+                "${android.provider.MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?",
+                arrayOf(ruta, "$PREFIJO%"), "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} DESC")?.use { c ->
+                var i = 0
+                while (c.moveToNext()) {
+                    if (i++ >= MAXIMO) viejas += android.content.ContentUris.withAppendedId(col, c.getLong(0))
+                }
+            }
+            viejas.forEach { runCatching { r.delete(it, null, null) } }
+        } else {
+            // Android 8 y 9: carpeta de la app en el almacenamiento compartido (se borra al desinstalar)
+            val dir = File(ctx.getExternalFilesDir(null), CARPETA).apply { mkdirs() }
+            File(dir, nombre).outputStream().use { Respaldo.exportar(ctx, db, it) }
+            dir.listFiles { f -> f.name.startsWith(PREFIJO) }?.sortedByDescending { it.name }?.drop(MAXIMO)?.forEach { it.delete() }
+        }
+    }
+}

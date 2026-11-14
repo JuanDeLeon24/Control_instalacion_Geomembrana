@@ -162,29 +162,29 @@ class AvanceRealTest {
 
     private val res by lazy { Importacion.leer(archivo(), p) }
 
-    @Test fun importaLos101Registros() {
+    @Test fun importaLos100Registros() {
         assertTrue(res.errores.toString(), res.errores.isEmpty())
         assertTrue(res.seccionesNuevas.isEmpty())
-        assertEquals(101, res.registros.size)
+        assertEquals(100, res.registros.size)   // la bóveda del 13/11/2026 se ingresa a mano
         val porSec = res.registros.groupBy { it.seccion }
-        assertEquals(listOf(28, 16, 57), listOf("Bota HD", "Bota HI", "Bóveda").map { porSec[it]!!.size })
+        assertEquals(listOf(28, 16, 56), listOf("Bota HD", "Bota HI", "Bóveda").map { porSec[it]!!.size })
         // Cantidades oficiales: se conservan exactas
         assertEquals(1990.98, porSec["Bota HD"]!!.sumOf { it.area!! }, 1e-6)
         assertEquals(1990.52, porSec["Bota HI"]!!.sumOf { it.area!! }, 1e-6)
-        assertEquals(12660.67, porSec["Bóveda"]!!.sumOf { it.area!! }, 1e-6)
+        assertEquals(12558.26, porSec["Bóveda"]!!.sumOf { it.area!! }, 1e-6)
         assertEquals(995.37, porSec["Bota HD"]!!.sumOf { it.longitud }, 1e-6)
-        assertEquals(666.37, porSec["Bóveda"]!!.sumOf { it.longitud }, 1e-6)
+        assertEquals(660.98, porSec["Bóveda"]!!.sumOf { it.longitud }, 1e-6)
     }
 
     @Test fun avancePorSeccion() {
         val s = Calc.porSeccion(res.registros, p).associateBy { it.seccion.nombre }
         assertEquals(995.0, s["Bota HD"]!!.cobertura.cubierto, 1e-6)       // K6+178 a K7+173 (lo de K7+173.35 sobresale)
         assertEquals(995.0, s["Bota HI"]!!.cobertura.cubierto, 1e-6)
-        assertEquals(666.0, s["Bóveda"]!!.cobertura.cubierto, 1e-6)        // K6+507 a K7+173
-        assertEquals(330.43, s["Bóveda"]!!.cobertura.restante, 1e-6)
+        assertEquals(660.61, s["Bóveda"]!!.cobertura.cubierto, 1e-6)       // K6+512.39 a K7+173
+        assertEquals(335.82, s["Bóveda"]!!.cobertura.restante, 1e-6)
         assertEquals(1, s["Bóveda"]!!.cobertura.pendientes.size)
         assertEquals(6176.57, s["Bóveda"]!!.cobertura.pendientes[0].ini, 1e-9)
-        assertEquals(6507.0, s["Bóveda"]!!.cobertura.pendientes[0].fin, 1e-9)
+        assertEquals(6512.39, s["Bóveda"]!!.cobertura.pendientes[0].fin, 1e-9)
         assertTrue(Calc.todosLosTraslapos(res.registros).isEmpty())
         // Botas marcadas como terminadas cuentan al 100 %
         val pt = p.copy(secciones = p.secciones.map { if (it.nombre.startsWith("Bota")) it.copy(terminada = true) else it })
@@ -195,9 +195,9 @@ class AvanceRealTest {
         assertEquals(listOf("Bota", "Bóveda"), grupos.map { it.nombre })
         assertEquals(1.0, grupos[0].porcentaje, 1e-9)
         assertEquals(3981.50, grupos[0].rend.area, 1e-6)          // 1990,98 + 1990,52 m²
-        assertEquals(666.0 / 996.43, grupos[1].porcentaje, 1e-9)
-        assertEquals(330.43, grupos[1].pendiente, 1e-6)
-        assertEquals(LocalDate.of(2026, 12, 25), grupos[1].etaFecha!!.toLocalDate())
+        assertEquals(660.61 / 996.43, grupos[1].porcentaje, 1e-9)
+        assertEquals(335.82, grupos[1].pendiente, 1e-6)
+        assertEquals(LocalDate.of(2026, 11, 24), grupos[1].etaFecha!!.toLocalDate())
         // Métricas de una jornada: 2026-07-23 solo bota (HD y HI)
         val m = Calc.metricas(res.registros.filter { it.fecha == "2026-07-23" }, p)
         assertEquals(1, m.size)
@@ -205,29 +205,29 @@ class AvanceRealTest {
         assertEquals(2 * 146.70, m[0].total.area, 1e-6)
         assertEquals(2, m[0].porSeccion.size)
         val g = Calc.avanceGlobal(st)
-        assertEquals((2 * 2.0 * 996.43 + 19.0 * 666.0) / (23.0 * 996.43), g, 1e-9)
+        assertEquals((2 * 2.0 * 996.43 + 19.0 * 660.61) / (23.0 * 996.43), g, 1e-9)
     }
 
     @Test fun proyeccionBoveda() {
         val bov = Calc.deSeccion(res.registros, "Bóveda")
         val e = Calc.eta(bov, p)
-        // Últimos 6 turnos: 10/10 (14,58), 10/11 (10), 10/12 (7,29), 10/13 (7,29), 10/14 (3,16), 11/13 (5,39)
-        assertEquals(47.71 / 6, e.mPorTurno!!, 1e-9)
-        assertEquals(330.43 / (47.71 / 6), e.turnosRestantes!!, 1e-9)
-        assertEquals(LocalDate.of(2026, 12, 25), e.fechaHora!!.toLocalDate())
+        // Últimos 6 turnos: 10/09 (7,29), 10/10 (14,58), 10/11 (10), 10/12 (7,29), 10/13 (7,29), 10/14 (3,16)
+        assertEquals(49.61 / 6, e.mPorTurno!!, 1e-9)
+        assertEquals(335.82 / (49.61 / 6), e.turnosRestantes!!, 1e-9)
+        assertEquals(LocalDate.of(2026, 11, 24), e.fechaHora!!.toLocalDate())
 
         val c = Calc.curvaS(res.registros, p.secciones[2], p)
         assertEquals(LocalDate.of(2026, 8, 13), c.real.first().fecha)
         assertEquals(0.0, c.real.first().metros, 1e-9)
-        assertEquals(LocalDate.of(2026, 11, 13), c.real.last().fecha)
-        assertEquals(666.0, c.real.last().metros, 1e-6)
+        assertEquals(LocalDate.of(2026, 10, 14), c.real.last().fecha)
+        assertEquals(660.61, c.real.last().metros, 1e-6)
         // La curva real nunca baja
         assertTrue(c.real.zipWithNext().all { (a, b) -> b.metros >= a.metros - 1e-9 })
-        assertEquals(LocalDate.of(2026, 12, 25), c.proyReciente.last().fecha)
+        assertEquals(LocalDate.of(2026, 11, 24), c.proyReciente.last().fecha)
         assertEquals(996.43, c.proyReciente.last().metros, 1e-9)
         assertTrue(c.proyPromedio.isNotEmpty())
-        // Promedio de todos los turnos de la bóveda: 666,37 m en 46 días con registro
-        assertEquals(666.37 / 46, c.mPorDiaPromedio!!, 1e-9)
+        // Promedio de todos los turnos de la bóveda: 660,98 m en 45 días con registro
+        assertEquals(660.98 / 45, c.mPorDiaPromedio!!, 1e-9)
         // Botas: sin proyección si se marcan terminadas
         val bota = Calc.curvaS(res.registros, Seccion("Bota HD", 2.0, terminada = true), p)
         assertTrue(bota.proyReciente.isEmpty())
